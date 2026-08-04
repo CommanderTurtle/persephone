@@ -53,3 +53,5 @@ This matrix is the implementation answer to the original OMP migration analysis.
 - Zed: **native ACP path preserved**.
 - Telemetry-off local operation: **forced for Persephone/child processes**.
 - Sandwich/Bun: **Bun-only runtime; no Node executable or pnpm**.
+
+The detailed closure against the original workstation analysis, including the deliberately unclaimed edges, is in [OMP migration: planned versus delivered](OMP-THOUGHTS-COMPARISON.md).

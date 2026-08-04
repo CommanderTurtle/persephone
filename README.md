@@ -170,4 +170,4 @@ persephone uninstall
 - OMP's own per-tool approval policy remains authoritative.
 - OMP extensions execute as trusted in-process code. Install Persephone only from a reviewed source tree.
 
-See [Architecture](docs/ARCHITECTURE.md), [Capability matrix](docs/CAPABILITY-MATRIX.md), and [Security](docs/SECURITY.md).
+See [Architecture](docs/ARCHITECTURE.md), [Capability matrix](docs/CAPABILITY-MATRIX.md), [planned-versus-delivered analysis](docs/OMP-THOUGHTS-COMPARISON.md), and [Security](docs/SECURITY.md).

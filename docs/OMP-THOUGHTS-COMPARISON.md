@@ -1,0 +1,92 @@
+# OMP migration: planned versus delivered
+
+This document closes the loop on the workstation analysis recorded in `Omp Thoughts.md`. The original analysis concluded that OMP could replace Hermes only when paired with a small sovereign control plane. Persephone is that control plane.
+
+The result is deliberately not a Hermes fork and not a second agent harness. OMP continues to own the model loop, editing, LSP, planning, steering, tasks, skills, MCP, ACP, profiles, artifacts, compaction, and sessions. Persephone owns only the persistent operational concerns that do not belong in the interactive harness.
+
+## Original control-plane requirements
+
+|Original requirement|Delivered implementation|Boundary|
+|---|---|---|
+|Daemon supervisor|A systemd user service runs the Bun daemon and its OMP RPC worker pool.|Persephone does not supervise unrelated workstation services.|
+|Durable event queue|SQLite WAL inbox and outbox state, deduplication, bounded retries, crash recovery, and route persistence.|Messages are text-first in this release; binary attachment ingestion remains transport-specific future work.|
+|Channel-to-session routing|Every Signal contact/group, Discord DM/channel/thread channel, and Slack DM/channel/thread maps to a persistent OMP session.|A route is intentionally isolated from every other route.|
+|Durable scheduler|Five-field local-time cron definitions persist in SQLite, avoid duplicate execution for a minute, retain the latest result/error, and can deliver through any enabled transport.|It does not replay every minute missed while the host was powered off or maintain an unbounded run ledger.|
+|Remote approvals|OMP RPC UI requests produce expiring approval records bound to the exact originating transport and route.|OMP's native per-tool policy remains authoritative and can still deny a tool before remote approval.|
+|Operational profiles|Routes can select native OMP profiles and independently pin provider, model, thinking level, and working directory.|Persephone does not duplicate Hermes' full identity/credential/profile-process abstraction. OMP remains the profile owner.|
+
+## Channel architecture
+
+Hermes' separation between platform adapters was preserved. Signal, Discord, and Slack do not share platform code or credentials. They implement one small transport contract and feed the same durable control plane:
+
+```text
+signal-cli HTTP/SSE ─┐
+Discord Gateway/REST ├─ transport event ─ SQLite route/queue ─ OMP RPC worker
+Slack Socket/Web API ┘                                      └─ durable reply
+```
+
+- Signal uses the local `signal-cli` JSON-RPC/SSE service.
+- Discord uses Gateway v10 plus REST and supports DMs, channels, and thread channels.
+- Slack uses Socket Mode plus the Web API and preserves Slack thread identity.
+- Each adapter is disabled by default, separately allowlisted, and separately health-checked.
+- Commands, steering, follow-ups, model selection, and approvals behave consistently because those semantics live above the transport boundary.
+
+GitHub is intentionally not treated as a fourth chat transport. OMP already ships `roboomp`, whose webhook verification, durable issue state, isolated worktrees, OMP RPC sessions, and credential-separated `gh-proxy` are better suited to GitHub automation. Persephone only includes optional local health discovery for that native service.
+
+## Web tooling
+
+The workstation's two web systems remain separate by design:
+
+- **Firecrawl owns search.** Persephone registers OMP's `web_search` schema against the self-hosted Firecrawl `/v2/search` endpoint. Firecrawl may use the local SearXNG container internally; SearXNG is not exposed as a competing OMP provider. A local outage fails closed unless cloud fallback is explicitly enabled.
+- **Camofox owns browsing and automation.** Its native MCP tools are registered with OMP. OMP's Chromium/Puppeteer browser entry is hidden and inactive so it cannot accidentally become a second browser backend.
+
+This is not a Firecrawl-to-browser substitution. Search and interactive browser state have distinct owners.
+
+## Existing workstation integrations
+
+|System|Delivered OMP role|
+|---|---|
+|Context Mode|Linked through its native OMP plugin manifest; useful for indexed bulk material without replacing OMP's normal coding tools.|
+|Retrieval|Watcher-backed stdio MCP for archived skills and semantic/session material.|
+|Librarian|Public stdio MCP plus an isolated OMP RPC profile for delegated retrieval and synthesis.|
+|Codebase Memory|Compiled stdio MCP for project structure, graph, and wiki knowledge.|
+|Camofox|Authoritative browser MCP.|
+|Firecrawl|Authoritative local search provider.|
+|Local model|Inherited from OMP's selected profile unless a route deliberately overrides it.|
+|Zed|OMP's native `omp acp` path; Persephone adds only a convenience launcher.|
+
+Mnemopi remains disabled initially. It would create another autonomous recall owner beside Retrieval, Librarian, Context Mode, and Codebase Memory. Nothing prevents enabling it later for narrowly OMP-specific memory, but Persephone does not silently create a second mutable memory database.
+
+## Native OMP features left native
+
+The original analysis identified many things that looked like possible migration work but were already first-class OMP behavior. Persephone therefore leaves these untouched:
+
+- Hashline and LSP-backed editing;
+- plan-mode enforcement and mid-turn steering;
+- tasks, subagents, Agent Hub, swarm/DAG orchestration, and async jobs;
+- artifacts, output minimization, compaction, skills, and rules;
+- provider/model configuration and coding-session persistence;
+- MCP, ACP, RPC, extensions, and tool approval policy.
+
+The absence of wrappers here is intentional. Updates to these capabilities arrive through OMP's normal update path.
+
+## Privacy and runtime policy
+
+- Bun is the only JavaScript runtime required by Persephone.
+- No Node executable, pnpm workspace, cloud relay, or analytics service is introduced.
+- `OTEL_SDK_DISABLED=true` is forced for the daemon and OMP RPC children.
+- The control API binds to loopback by default; non-loopback binding requires a bearer token.
+- Third-party platform traffic occurs only when its explicit Discord or Slack adapter is enabled.
+- Firecrawl and Camofox default to loopback endpoints.
+
+## Separate Zed-first Orca fork
+
+Orca is not required by Persephone or OMP ACP. A narrow companion fork nevertheless makes Zed the primary external editor for operators who want Orca's desktop orchestration surface. The fork retains VS Code compatibility, adds Zed SSH URI handling, and is maintained as one commit over current Orca upstream. This keeps desktop UI preference out of the gateway and out of OMP core.
+
+## Revised verdict
+
+The original document's revised hypothesis was correct: **OMP plus a small sovereign control plane can credibly replace Hermes for this workstation's interactive, coding, research, scheduled, and messaging workflows.**
+
+The result should be understood as a clean architectural equivalent, not a line-by-line Hermes recreation. Hermes may coexist during channel cutover, but one Signal account must have only one active consumer. Persephone is ready for that cutover once the operator enables the desired adapters and verifies their platform credentials.
+
+The deliberately unclaimed edges are explicit: transport attachments, powered-off cron catch-up/history, and Hermes-style full operational identity lifecycle. None is hidden behind a misleading compatibility claim, and none changes the ownership model described above.
