@@ -137,7 +137,11 @@ export class SlackClient implements ChatTransport {
     const body = stripSlackMention(rawBody, this.botUserId).trim();
     if (!body) return null;
     const threadTs = stringField(event, "thread_ts");
-    const messageId = stringField(payload, "event_id") || `${channelId}:${eventTs}`;
+    // A mentioned channel message may arrive through both the `message` and
+    // `app_mention` subscriptions. The channel timestamp identifies the
+    // underlying Slack message across both envelopes, so the durable inbox
+    // can collapse the duplicate without conflating separate channels.
+    const messageId = `${channelId}:${eventTs}`;
     return {
       peerId: `channel:${channelId}${threadTs ? `:thread:${threadTs}` : ""}`,
       senderId,

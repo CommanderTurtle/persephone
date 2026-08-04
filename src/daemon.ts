@@ -5,7 +5,7 @@ import { DiscordClient } from "./discord.ts";
 import { OmpWorkerPool, type OmpRpcWorker } from "./rpc.ts";
 import { SignalClient } from "./signal.ts";
 import { SlackClient } from "./slack.ts";
-import type { ChatTransport } from "./transport.ts";
+import { sleep, type ChatTransport } from "./transport.ts";
 import type { InboxRecord, JsonObject, PersephoneConfig, RouteRecord, ScheduleRecord, ThinkingLevel } from "./types.ts";
 
 interface PendingApproval {
@@ -458,14 +458,4 @@ function json(value: unknown, status = 200): Response {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-async function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal.addEventListener("abort", () => {
-      clearTimeout(timer);
-      resolve();
-    }, { once: true });
-  });
 }
