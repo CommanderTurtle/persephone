@@ -131,6 +131,7 @@ function integrateLibrarian(
     OMP_TIMEOUT_MS: existing.OMP_TIMEOUT_MS || "600000",
     OMP_PROVIDER: config.omp.provider || existing.OMP_PROVIDER || "",
     OMP_MODEL: config.omp.model || existing.OMP_MODEL || "",
+    VLLM_API_KEY: existing.VLLM_API_KEY || process.env.VLLM_API_KEY || "local",
     QUERY_CACHE: existing.QUERY_CACHE || "true",
     QUERY_CACHE_TTL: existing.QUERY_CACHE_TTL || "24h",
     HOT_MEMORY: existing.HOT_MEMORY || "true",

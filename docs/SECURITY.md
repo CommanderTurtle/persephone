@@ -24,7 +24,7 @@ OMP extensions are in-process code with the user's permissions. Persephone there
 
 MCP servers remain separate child processes. Persephone writes only named entries into OMP's existing MCP JSON and refuses malformed source configuration.
 
-The Librarian worker profile copies operational OMP settings and model-definition files so a local default model remains usable, but it does not copy `agent.db` credentials, sessions, or `models.db` caches. Cloud credentials must be provided through OMP's normal environment or auth-broker path if that profile needs them.
+The Librarian worker profile copies operational OMP settings and model-definition files so a local default model remains usable, and its child environment opts local unauthenticated vLLM discovery in with OMP's documented non-secret sentinel. It does not copy `agent.db` credentials, sessions, or `models.db` caches. Cloud credentials must be provided through OMP's normal environment or auth-broker path if that profile needs them.
 
 ## Tool authorization
 
