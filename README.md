@@ -110,6 +110,8 @@ The three transports are independent adapters:
 |Discord|Gateway v10 WebSocket + REST|DM, channel, or Discord thread channel|
 |Slack|Socket Mode WebSocket + Web API|DM, channel, or Slack thread|
 
+Microsoft Teams is not implemented. Slack's `allowedTeams` setting refers to Slack workspace/team IDs.
+
 Discord needs the Message Content privileged intent. Grant only View Channels, Send Messages, and Read Message History where the bot is meant to operate. With `requireMention: true` (the default), guild traffic is accepted only when the bot is mentioned; direct messages do not need a mention.
 
 For Slack, enable Socket Mode, give the app token `connections:write`, and subscribe the bot to `app_mention` and `message.im`. Grant `app_mentions:read`, `chat:write`, and the history scopes for only the channel types you intend to use. If `requireMention` is disabled, subscribe to the corresponding channel message events as well.
