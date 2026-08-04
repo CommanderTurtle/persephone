@@ -79,9 +79,9 @@ The absence of wrappers here is intentional. Updates to these capabilities arriv
 - Third-party platform traffic occurs only when its explicit Discord or Slack adapter is enabled.
 - Firecrawl and Camofox default to loopback endpoints.
 
-## Separate Zed-first Orca fork
+## Optional stock Orca companion
 
-Orca is not required by Persephone or OMP ACP. A narrow companion fork nevertheless makes Zed the primary external editor for operators who want Orca's desktop orchestration surface. The fork retains VS Code compatibility, adds Zed SSH URI handling, and is maintained as one commit over current Orca upstream. This keeps desktop UI preference out of the gateway and out of OMP core.
+Orca is not required by Persephone or OMP ACP. Operators who want its desktop worktree-orchestration surface can use the unmodified upstream checkout as a separate application. Orca does not replace the gateway, OMP, or Zed; opening an ordinary worktree in Zed remains the native `zed .` command. Keeping Orca on its stock Git origin avoids a maintenance fork and lets its normal source lifecycle deliver updates independently.
 
 ## Revised verdict
 
