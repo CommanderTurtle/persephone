@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -17,6 +18,7 @@ import tempfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 
@@ -201,6 +203,19 @@ def _verify_package(path: Path, asset: dict[str, Any]) -> None:
             )
 
 
+@contextlib.contextmanager
+def _apt_readable_package(package: Path) -> Iterator[Path]:
+    """Stage a verified package where apt's unprivileged downloader can read it."""
+
+    with tempfile.TemporaryDirectory(prefix="orca-ide-", dir="/var/tmp") as temporary:
+        root = Path(temporary)
+        root.chmod(0o755)
+        staged = root / package.name
+        shutil.copyfile(package, staged)
+        staged.chmod(0o644)
+        yield staged
+
+
 def _private_launcher() -> list[str]:
     environment_file = Path.home() / ".config" / "environment.d" / "90-orca-privacy.conf"
     desktop_file = Path.home() / ".local" / "share" / "applications" / "orca-ide.desktop"
@@ -272,10 +287,11 @@ def main() -> int:
                 package = _download(asset, arguments.cache_dir)
                 payload["download"] = str(package)
                 if arguments.action == "install" and not payload["current"]:
-                    apt = ["apt-get", "install", "-y", str(package)]
-                    if os.geteuid() != 0:
-                        apt.insert(0, "sudo")
-                    result = subprocess.run(apt, check=False)
+                    with _apt_readable_package(package) as apt_package:
+                        apt = ["apt-get", "install", "-y", str(apt_package)]
+                        if os.geteuid() != 0:
+                            apt.insert(0, "sudo")
+                        result = subprocess.run(apt, check=False)
                     if result.returncode:
                         raise OrcaDebError(
                             "apt did not install Orca; rerun this command in an interactive terminal"
