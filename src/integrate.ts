@@ -44,6 +44,7 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
   });
 
   const services = config.integrations.servicesRoot;
+  const publicEntries: Record<string, unknown> = {};
   if (config.integrations.contextMode) {
     const root = path.join(services, "context-mode");
     if (!existsSync(path.join(root, "package.json"))) {
@@ -55,10 +56,15 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
         status: command.status === 0 ? "integrated" : "failed",
         detail: command.status === 0 ? "Linked through its native omp.extensions entry" : cleanOutput(command),
       });
+      const server = path.join(root, "server.bundle.mjs");
+      if (existsSync(server)) {
+        publicEntries["context-mode"] = { type: "stdio", command: bun, args: [server], cwd: root };
+        results.push({ name: "context-mode-mcp", status: "integrated", detail: server });
+      } else {
+        results.push({ name: "context-mode-mcp", status: "missing", detail: server });
+      }
     }
   }
-
-  const publicEntries: Record<string, unknown> = {};
 
   if (config.integrations.retrieval) {
     const root = path.join(services, "retrieval");

@@ -73,7 +73,7 @@ Leave it disabled while Hermes owns the same Signal account. During a cutover, s
 
 |Project|OMP integration|
 |---|---|
-|Context Mode|`omp plugin link` using its own `omp.extensions` manifest|
+|Context Mode|`omp plugin link` for lifecycle hooks plus its bundled stdio MCP launched directly with Bun|
 |Librarian|Public stdio MCP plus a private `librarian` OMP RPC profile whose MCP surface contains only deterministic OKF tools|
 |Retrieval|Its watcher-backed `start.sh` stdio MCP|
 |Codebase Memory|Its compiled, zero-dependency stdio server|
@@ -146,6 +146,8 @@ omp acp
 
 `persephone zed /path/to/project` opens the project, but Persephone never inserts another editor bridge between Zed and OMP. Editor writes and permission requests therefore keep OMP's native ACP behavior.
 
+OMP deliberately gives the ACP client ownership of MCP servers. Zed sessions do not fall back to OMP's normal on-disk MCP registry, although plugins, extensions, hooks, and skills still load. An ACP client must pass the desired stdio/HTTP/SSE definitions with session creation; whether a particular Zed build exposes that configuration is a Zed-side capability that must be verified. See the [OMP configuration research](docs/OMP-CONFIGURATION-RESEARCH.md#mcp-rpc-acp-and-librarian) for the exact boundary.
+
 ## Lifecycle
 
 ```bash
@@ -170,4 +172,4 @@ persephone uninstall
 - OMP's own per-tool approval policy remains authoritative.
 - OMP extensions execute as trusted in-process code. Install Persephone only from a reviewed source tree.
 
-See [Architecture](docs/ARCHITECTURE.md), [Capability matrix](docs/CAPABILITY-MATRIX.md), [planned-versus-delivered analysis](docs/OMP-THOUGHTS-COMPARISON.md), and [Security](docs/SECURITY.md).
+See [Architecture](docs/ARCHITECTURE.md), [Capability matrix](docs/CAPABILITY-MATRIX.md), [planned-versus-delivered analysis](docs/OMP-THOUGHTS-COMPARISON.md), [OMP configuration research](docs/OMP-CONFIGURATION-RESEARCH.md), and [Security](docs/SECURITY.md).

@@ -64,7 +64,10 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
 
   if (includeRuntime) {
     if (librarian && omp) {
-      results.push(probeLibrarianMcp(omp, librarian.profile));
+      results.push(probeMcp(omp, librarian.profile, "librarian-okf"));
+    }
+    if (config.integrations.contextMode && omp) {
+      results.push(probeMcp(omp, config.omp.profile, "context-mode"));
     }
     if (config.web.firecrawl.enabled) {
       results.push(await probeHttpService(
@@ -155,10 +158,10 @@ function librarianIntegration(config: PersephoneConfig): { profile: string } | n
   return { profile: environment.OMP_PROFILE || "librarian" };
 }
 
-function probeLibrarianMcp(omp: string, profile: string): CheckResult {
+function probeMcp(omp: string, profile: string, server: string): CheckResult {
   const request = [
     JSON.stringify({ id: "protocol", type: "negotiate_protocol", protocolVersion: 2 }),
-    JSON.stringify({ id: "probe", type: "prompt", message: "/mcp test librarian-okf" }),
+    JSON.stringify({ id: "probe", type: "prompt", message: `/mcp test ${server}` }),
     "",
   ].join("\n");
   const probe = spawnSync(omp, ["--profile", profile, "--mode", "rpc", "--no-session"], {
@@ -172,10 +175,10 @@ function probeLibrarianMcp(omp: string, profile: string): CheckResult {
   const message = output
     .split(/\r?\n/)
     .map(readCommandOutput)
-    .find((value) => value.includes('Server "librarian-okf"'));
+    .find((value) => value.includes(`Server "${server}"`));
   const ok = probe.status === 0 && Boolean(message?.includes(" connected ("));
   return {
-    check: "mcp:librarian-okf:runtime",
+    check: `mcp:${server}:runtime`,
     ok,
     detail: message || (probe.error?.message ?? `OMP RPC exited ${probe.status ?? "without a status"}`),
   };
@@ -221,6 +224,7 @@ function readMcpNames(file: string): string[] {
 
 function expectedMcpNames(config: PersephoneConfig): string[] {
   return [
+    config.integrations.contextMode && "context-mode",
     config.integrations.librarian && "librarian",
     config.integrations.retrieval && "retrieval",
     config.integrations.codebaseMemory && "codebase-memory",
