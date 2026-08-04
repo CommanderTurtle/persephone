@@ -1,0 +1,447 @@
+import type { Server } from "bun";
+import { cronMatches, cronMinute } from "./cron.ts";
+import { PersephoneDatabase } from "./database.ts";
+import { OmpWorkerPool, type OmpRpcWorker } from "./rpc.ts";
+import { SignalClient } from "./signal.ts";
+import type { InboxRecord, JsonObject, PersephoneConfig, RouteRecord, ScheduleRecord, ThinkingLevel } from "./types.ts";
+
+interface PendingApproval {
+  workerKey: string;
+  peerId: string;
+  resolve: (response: JsonObject) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+export class PersephoneDaemon {
+  readonly db: PersephoneDatabase;
+  readonly pool: OmpWorkerPool;
+  readonly signalClient?: SignalClient;
+  private readonly controller = new AbortController();
+  private readonly active = new Set<Promise<void>>();
+  private readonly approvals = new Map<number, PendingApproval>();
+  private server?: Server<unknown>;
+  private startedAt = Date.now();
+
+  constructor(readonly config: PersephoneConfig) {
+    this.db = new PersephoneDatabase();
+    this.pool = new OmpWorkerPool(config.omp.maxWorkers, config.omp.idleSeconds * 1000);
+    if (config.signal.enabled) this.signalClient = new SignalClient(config.signal);
+  }
+
+  async run(): Promise<void> {
+    this.server = Bun.serve({
+      hostname: this.config.listen.host,
+      port: this.config.listen.port,
+      fetch: (request) => this.handleHttp(request),
+    });
+    console.log(`Persephone listening on http://${this.config.listen.host}:${this.server.port}`);
+    if (this.signalClient) this.startLoop("signal", () => this.signalLoop());
+    this.startLoop("inbox", () => this.inboxLoop());
+    this.startLoop("outbox", () => this.outboxLoop());
+    this.startLoop("scheduler", () => this.schedulerLoop());
+    this.startLoop("reaper", () => this.reaperLoop());
+
+    await new Promise<void>((resolve) => {
+      const stop = () => {
+        process.off("SIGINT", stop);
+        process.off("SIGTERM", stop);
+        resolve();
+      };
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
+    });
+    await this.close();
+  }
+
+  async close(): Promise<void> {
+    this.controller.abort();
+    this.server?.stop(true);
+    for (const [id, pending] of this.approvals) {
+      clearTimeout(pending.timer);
+      this.db.resolveApproval(id, { cancelled: true }, "denied");
+      pending.resolve({ cancelled: true });
+    }
+    this.approvals.clear();
+    await this.pool.close();
+    await Promise.allSettled([...this.active]);
+    this.db.close();
+  }
+
+  status(): Record<string, unknown> {
+    return {
+      ok: true,
+      version: 1,
+      uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
+      pid: process.pid,
+      workers: this.pool.size,
+      signal: {
+        enabled: Boolean(this.signalClient),
+        url: this.config.signal.url,
+      },
+      queues: this.db.status(),
+    };
+  }
+
+  private startLoop(name: string, body: () => Promise<void>): void {
+    const task = body().catch((error) => {
+      if (!this.controller.signal.aborted) console.error(`[${name}] ${formatError(error)}`);
+    });
+    this.track(task);
+  }
+
+  private track(task: Promise<void>): void {
+    this.active.add(task);
+    void task.finally(() => this.active.delete(task));
+  }
+
+  private async signalLoop(): Promise<void> {
+    const client = this.signalClient!;
+    for await (const event of client.events(this.controller.signal)) {
+      this.db.enqueueInbox("signal", event.peerId, event.messageId, event.body, event.receivedAt);
+    }
+  }
+
+  private async inboxLoop(): Promise<void> {
+    while (!this.controller.signal.aborted) {
+      const records = this.db.claimInbox(Math.max(4, this.config.omp.maxWorkers * 2));
+      for (const record of records) this.track(this.processInbox(record));
+      await sleep(records.length ? 100 : 500, this.controller.signal);
+    }
+  }
+
+  private async processInbox(record: InboxRecord): Promise<void> {
+    try {
+      const route = this.ensureRoute(record.channel, record.peerId);
+      const commandResult = await this.handleCommand(record, route);
+      if (commandResult !== null) {
+        this.reply(record, commandResult);
+        this.db.finishInbox(record.id);
+        return;
+      }
+
+      const worker = await this.workerFor(route);
+      try {
+        await this.signalClient?.typing(record.peerId, true);
+        const typingTimer = this.signalClient
+          ? setInterval(() => void this.signalClient?.typing(record.peerId, true), 8000)
+          : undefined;
+        try {
+          this.db.updateWorker(worker.options.key, worker.sessionPath, worker.pid, route.profile, route.cwd, "busy");
+          const result = await worker.runPrompt(record.body);
+          this.db.updateWorker(worker.options.key, result.sessionPath, worker.pid, route.profile, route.cwd, "ready");
+          this.reply(record, result.text || "OMP completed the turn without a text response.");
+        } finally {
+          if (typingTimer) clearInterval(typingTimer);
+          await this.signalClient?.typing(record.peerId, false);
+        }
+      } finally {
+        worker.release();
+      }
+      this.db.finishInbox(record.id);
+    } catch (error) {
+      const message = formatError(error);
+      this.db.finishInbox(record.id, message);
+      this.reply(record, `Persephone could not complete that turn: ${message}`);
+    }
+  }
+
+  private ensureRoute(channel: string, peerId: string): RouteRecord {
+    return (
+      this.db.getRoute(channel, peerId) ??
+      this.db.upsertRoute({
+        channel,
+        peerId,
+        sessionPath: null,
+        cwd: this.config.omp.cwd,
+        profile: this.config.omp.profile,
+        provider: this.config.omp.provider ?? null,
+        model: this.config.omp.model ?? null,
+        thinking: this.config.omp.thinking ?? null,
+      })
+    );
+  }
+
+  private async workerFor(route: RouteRecord): Promise<OmpRpcWorker> {
+    const key = `${route.channel}:${route.peerId}`;
+    const worker = await this.pool.acquire({
+      key,
+      command: this.config.omp.command,
+      profile: route.profile,
+      cwd: route.cwd,
+      sessionPath: route.sessionPath,
+      provider: route.provider,
+      model: route.model,
+      thinking: route.thinking,
+      onSession: (sessionPath) => this.db.updateSession(route.channel, route.peerId, sessionPath),
+      onUiRequest: (request) => this.handleUiRequest(key, route.peerId, request),
+      onExit: () => {
+        this.db.markWorkerStopped(key);
+        this.cancelWorkerApprovals(key);
+      },
+    });
+    this.db.updateWorker(key, worker.sessionPath, worker.pid, route.profile, route.cwd, "ready");
+    return worker;
+  }
+
+  private async handleCommand(record: InboxRecord, route: RouteRecord): Promise<string | null> {
+    const body = record.body.trim();
+    if (!body.startsWith("/")) return null;
+    const [rawCommand, ...parts] = body.split(/\s+/);
+    const command = rawCommand?.toLowerCase();
+    switch (command) {
+      case "/help":
+        return [
+          "Persephone commands:",
+          "/status · /new · /steer TEXT · /follow TEXT",
+          "/cwd PATH · /model PROVIDER/MODEL · /thinking LEVEL",
+          "/approve ID · /deny ID",
+        ].join("\n");
+      case "/status": {
+        const worker = this.pool.get(`${route.channel}:${route.peerId}`);
+        const state = worker ? await worker.getState() : undefined;
+        return JSON.stringify({ route, worker: state ?? "stopped", queues: this.db.status() }, null, 2);
+      }
+      case "/new": {
+        await this.pool.drop(`${route.channel}:${route.peerId}`);
+        this.db.updateSession(route.channel, route.peerId, null);
+        return "The next message will begin a new OMP session.";
+      }
+      case "/steer": {
+        const message = parts.join(" ").trim();
+        if (!message) return "Usage: /steer TEXT";
+        const worker = this.pool.get(`${route.channel}:${route.peerId}`);
+        if (!worker) return "No active OMP turn exists to steer.";
+        await worker.steer(message);
+        return "Steering message queued.";
+      }
+      case "/follow": {
+        const message = parts.join(" ").trim();
+        if (!message) return "Usage: /follow TEXT";
+        const worker = this.pool.get(`${route.channel}:${route.peerId}`);
+        if (!worker) return "No active OMP worker exists; send the message normally instead.";
+        await worker.followUp(message);
+        return "Follow-up queued.";
+      }
+      case "/cwd": {
+        const cwd = parts.join(" ").trim();
+        if (!cwd || !cwd.startsWith("/")) return "Usage: /cwd /absolute/path";
+        await this.pool.drop(`${route.channel}:${route.peerId}`);
+        this.db.upsertRoute({ ...stripTimes(route), cwd, sessionPath: null });
+        return `Working directory changed to ${cwd}; the next message starts a new session.`;
+      }
+      case "/model": {
+        const value = parts.join(" ").trim();
+        const separator = value.indexOf("/");
+        if (separator < 1 || separator === value.length - 1) return "Usage: /model PROVIDER/MODEL";
+        const provider = value.slice(0, separator);
+        const model = value.slice(separator + 1);
+        const worker = this.pool.get(`${route.channel}:${route.peerId}`);
+        if (worker) await worker.setModel(provider, model);
+        this.db.upsertRoute({ ...stripTimes(route), provider, model });
+        return `Model set to ${provider}/${model}.`;
+      }
+      case "/thinking": {
+        const level = parts[0] as ThinkingLevel | undefined;
+        const allowed = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+        if (!level || !allowed.has(level)) return "Usage: /thinking off|minimal|low|medium|high|xhigh|max";
+        const worker = this.pool.get(`${route.channel}:${route.peerId}`);
+        if (worker) await worker.setThinking(level);
+        this.db.upsertRoute({ ...stripTimes(route), thinking: level });
+        return `Thinking level set to ${level}.`;
+      }
+      case "/approve":
+      case "/deny": {
+        const id = Number(parts[0]);
+        if (!Number.isInteger(id)) return `Usage: ${command} ID`;
+        const pending = this.approvals.get(id);
+        const stored = this.db.getApproval(id);
+        if (!pending || !stored || stored.peerId !== record.peerId || stored.status !== "pending") {
+          return `Approval ${id} is not pending for this conversation.`;
+        }
+        const approved = command === "/approve";
+        const value = parts.slice(1).join(" ").trim();
+        if (approved && stored.method !== "confirm" && !value) {
+          return `Approval ${id} needs a value: /approve ${id} VALUE`;
+        }
+        const response = stored.method === "confirm" ? { confirmed: approved } : { cancelled: !approved, value: approved ? value : undefined };
+        this.db.resolveApproval(id, response, approved ? "approved" : "denied");
+        clearTimeout(pending.timer);
+        this.approvals.delete(id);
+        pending.resolve(response);
+        return `Approval ${id} ${approved ? "accepted" : "denied"}.`;
+      }
+      default:
+        return "Unknown Persephone command. Use /help.";
+    }
+  }
+
+  private async handleUiRequest(workerKey: string, peerId: string, request: JsonObject): Promise<JsonObject> {
+    const method = String(request.method || "");
+    if (method === "cancel") {
+      const targetId = String(request.targetId || "");
+      const stored = this.db.getApprovalByRequest(workerKey, targetId);
+      if (stored) {
+        const pending = this.approvals.get(stored.id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.approvals.delete(stored.id);
+          pending.resolve({ cancelled: true });
+        }
+        this.db.resolveApproval(stored.id, { cancelled: true }, "denied");
+      }
+      return { cancelled: true };
+    }
+    if (["notify", "setStatus", "setWidget", "setTitle", "set_editor_text", "open_url"].includes(method)) {
+      if (method === "notify") {
+        const message = String(request.message || request.title || "OMP notification");
+        this.db.enqueueOutbox("signal", peerId, message);
+      }
+      return { cancelled: true };
+    }
+    if (!this.signalClient) return method === "confirm" ? { confirmed: false } : { cancelled: true };
+    const requestId = String(request.id || "");
+    const title = String(request.title || "OMP approval");
+    const message = String(request.message || request.prompt || method);
+    const expiresAt = Date.now() + this.config.security.approvalTimeoutSeconds * 1000;
+    const approval = this.db.createApproval({ workerKey, requestId, peerId, method, title, message, expiresAt });
+    this.db.enqueueOutbox(
+      "signal",
+      peerId,
+      `[Approval ${approval.id}] ${title}\n${message}\nReply /approve ${approval.id} or /deny ${approval.id}.`,
+    );
+    return await new Promise<JsonObject>((resolve) => {
+      const timer = setTimeout(() => {
+        this.approvals.delete(approval.id);
+        this.db.resolveApproval(approval.id, { cancelled: true, timedOut: true }, "denied");
+        resolve(method === "confirm" ? { confirmed: false } : { cancelled: true, timedOut: true });
+      }, this.config.security.approvalTimeoutSeconds * 1000);
+      this.approvals.set(approval.id, { workerKey, peerId, resolve, timer });
+    });
+  }
+
+  private cancelWorkerApprovals(workerKey: string): void {
+    for (const [id, pending] of this.approvals) {
+      if (pending.workerKey !== workerKey) continue;
+      clearTimeout(pending.timer);
+      this.approvals.delete(id);
+      this.db.resolveApproval(id, { cancelled: true }, "denied");
+      pending.resolve({ cancelled: true });
+    }
+  }
+
+  private reply(record: InboxRecord, body: string): void {
+    if (record.channel === "signal") this.db.enqueueOutbox("signal", record.peerId, body, record.id);
+    else console.log(`[${record.channel}:${record.peerId}] ${body}`);
+  }
+
+  private async outboxLoop(): Promise<void> {
+    while (!this.controller.signal.aborted) {
+      const records = this.db.claimOutbox(16);
+      for (const record of records) {
+        try {
+          if (record.channel !== "signal" || !this.signalClient) throw new Error(`Unsupported delivery channel: ${record.channel}`);
+          await this.signalClient.send(record.peerId, record.body);
+          this.db.finishOutbox(record.id);
+        } catch (error) {
+          this.db.finishOutbox(record.id, formatError(error), record.attempts < 5);
+        }
+      }
+      await sleep(records.length ? 100 : 500, this.controller.signal);
+    }
+  }
+
+  private async schedulerLoop(): Promise<void> {
+    while (!this.controller.signal.aborted) {
+      const now = new Date();
+      const minute = cronMinute(now);
+      for (const schedule of this.db.listSchedules()) {
+        if (!schedule.enabled || schedule.lastMinute === minute || !cronMatches(schedule.cron, now)) continue;
+        if (!this.db.claimSchedule(schedule.id, minute)) continue;
+        this.track(this.runSchedule(schedule, minute));
+      }
+      await sleep(this.config.scheduler.pollSeconds * 1000, this.controller.signal);
+    }
+  }
+
+  private async runSchedule(schedule: ScheduleRecord, minute: number): Promise<void> {
+    try {
+      const route = this.ensureRoute("schedule", schedule.name);
+      const configured = this.db.upsertRoute({
+        ...stripTimes(route),
+        cwd: schedule.cwd,
+        profile: schedule.profile,
+      });
+      const worker = await this.workerFor(configured);
+      try {
+        const result = await worker.runPrompt(schedule.prompt);
+        if (schedule.channel && schedule.peerId) this.db.enqueueOutbox(schedule.channel, schedule.peerId, result.text);
+      } finally {
+        worker.release();
+      }
+      this.db.markSchedule(schedule.id, minute);
+    } catch (error) {
+      this.db.markSchedule(schedule.id, minute, formatError(error));
+    }
+  }
+
+  private async reaperLoop(): Promise<void> {
+    while (!this.controller.signal.aborted) {
+      await sleep(60_000, this.controller.signal);
+      await this.pool.reapIdle();
+    }
+  }
+
+  private async handleHttp(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === "/health") return json(this.status());
+    if (!this.authorized(request)) return json({ error: "unauthorized" }, 401);
+    if (request.method === "GET" && url.pathname === "/v1/status") return json(this.status());
+    if (request.method === "GET" && url.pathname === "/v1/schedules") return json(this.db.listSchedules());
+    if (request.method === "GET" && url.pathname === "/v1/routes") return json(this.db.listRoutes());
+    if (request.method === "POST" && url.pathname === "/v1/prompt") {
+      const body = asObject(await request.json());
+      const channel = String(body.channel || "api");
+      const peerId = String(body.peerId || "owner");
+      const message = String(body.message || "").trim();
+      if (!message) return json({ error: "message is required" }, 400);
+      const messageId = String(body.messageId || `api:${crypto.randomUUID()}`);
+      const id = this.db.enqueueInbox(channel, peerId, messageId, message);
+      return json({ accepted: id !== null, inboxId: id }, id === null ? 409 : 202);
+    }
+    return json({ error: "not found" }, 404);
+  }
+
+  private authorized(request: Request): boolean {
+    const expected = process.env[this.config.listen.tokenEnv]?.trim();
+    if (!expected) return true;
+    const authorization = request.headers.get("authorization") || "";
+    return authorization === `Bearer ${expected}`;
+  }
+}
+
+function stripTimes(route: RouteRecord): Omit<RouteRecord, "createdAt" | "updatedAt"> {
+  const { createdAt: _created, updatedAt: _updated, ...rest } = route;
+  return rest;
+}
+
+function asObject(value: unknown): JsonObject {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function json(value: unknown, status = 200): Response {
+  return Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, milliseconds);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
+}

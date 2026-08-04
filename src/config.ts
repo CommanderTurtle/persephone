@@ -1,0 +1,192 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { configRoot, expandHome } from "./paths.ts";
+import type { PersephoneConfig, ThinkingLevel } from "./types.ts";
+
+const THINKING = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+export const DEFAULT_CONFIG: PersephoneConfig = {
+  version: 1,
+  listen: { host: "127.0.0.1", port: 4737, tokenEnv: "PERSEPHONE_API_TOKEN" },
+  omp: {
+    command: "omp",
+    profile: "default",
+    cwd: "~",
+    maxWorkers: 4,
+    idleSeconds: 1800,
+  },
+  signal: {
+    enabled: false,
+    url: "http://127.0.0.1:8090",
+    accountEnv: "SIGNAL_ACCOUNT",
+    allowedSenders: [],
+    allowedGroups: [],
+    typing: true,
+  },
+  integrations: {
+    servicesRoot: "~/Hermes",
+    contextMode: true,
+    librarian: true,
+    retrieval: true,
+    codebaseMemory: true,
+    camofox: true,
+  },
+  scheduler: { pollSeconds: 15 },
+  security: { approvalTimeoutSeconds: 300 },
+};
+
+export function configPath(): string {
+  return process.env.PERSEPHONE_CONFIG || path.join(configRoot(), "config.json");
+}
+
+export function envPath(): string {
+  return path.join(configRoot(), ".env");
+}
+
+export function loadEnvironment(): void {
+  const file = envPath();
+  if (!existsSync(file)) return;
+  for (const raw of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const separator = line.indexOf("=");
+    if (separator < 1) continue;
+    const key = line.slice(0, separator).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    let value = line.slice(separator + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+
+export function loadConfig(): PersephoneConfig {
+  loadEnvironment();
+  const file = configPath();
+  const parsed = existsSync(file)
+    ? (JSON.parse(readFileSync(file, "utf8")) as Partial<PersephoneConfig>)
+    : {};
+  const merged: PersephoneConfig = {
+    ...DEFAULT_CONFIG,
+    ...parsed,
+    listen: { ...DEFAULT_CONFIG.listen, ...parsed.listen },
+    omp: { ...DEFAULT_CONFIG.omp, ...parsed.omp },
+    signal: { ...DEFAULT_CONFIG.signal, ...parsed.signal },
+    integrations: { ...DEFAULT_CONFIG.integrations, ...parsed.integrations },
+    scheduler: { ...DEFAULT_CONFIG.scheduler, ...parsed.scheduler },
+    security: { ...DEFAULT_CONFIG.security, ...parsed.security },
+  };
+  validateConfig(merged);
+  merged.omp.cwd = expandHome(merged.omp.cwd);
+  merged.integrations.servicesRoot = expandHome(merged.integrations.servicesRoot);
+  return merged;
+}
+
+export function saveConfig(config: PersephoneConfig): void {
+  validateConfig(config);
+  const file = configPath();
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = `${file}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temporary, file);
+}
+
+export function ensureConfig(): { config: PersephoneConfig; created: boolean } {
+  const file = configPath();
+  if (existsSync(file)) return { config: loadConfig(), created: false };
+  const config = structuredClone(DEFAULT_CONFIG);
+  saveConfig(config);
+  const env = envPath();
+  if (!existsSync(env)) {
+    writeFileSync(env, "# Local secrets for Persephone\nSIGNAL_ACCOUNT=\nPERSEPHONE_API_TOKEN=\nOTEL_SDK_DISABLED=true\n", {
+      mode: 0o600,
+    });
+  }
+  return { config, created: true };
+}
+
+function validateConfig(config: PersephoneConfig): void {
+  if (config.version !== 1) throw new Error(`Unsupported config version: ${String(config.version)}`);
+  if (!config.listen || typeof config.listen.host !== "string" || !config.listen.host.trim()) {
+    throw new Error("listen.host must be a non-empty string");
+  }
+  if (!Number.isInteger(config.listen.port) || config.listen.port < 1 || config.listen.port > 65535) {
+    throw new Error("listen.port must be an integer from 1 to 65535");
+  }
+  if (typeof config.listen.tokenEnv !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.listen.tokenEnv)) {
+    throw new Error("listen.tokenEnv must name an environment variable");
+  }
+  if (!config.omp || typeof config.omp.command !== "string" || !config.omp.command.trim()) {
+    throw new Error("omp.command must be a non-empty string");
+  }
+  if (typeof config.omp.profile !== "string" || !config.omp.profile.trim()) {
+    throw new Error("omp.profile must be a non-empty string");
+  }
+  if (typeof config.omp.cwd !== "string" || !config.omp.cwd.trim()) {
+    throw new Error("omp.cwd must be a non-empty path");
+  }
+  if (!Number.isInteger(config.omp.maxWorkers) || config.omp.maxWorkers < 1 || config.omp.maxWorkers > 32) {
+    throw new Error("omp.maxWorkers must be an integer from 1 to 32");
+  }
+  if (!Number.isInteger(config.omp.idleSeconds) || config.omp.idleSeconds < 30) {
+    throw new Error("omp.idleSeconds must be an integer of at least 30");
+  }
+  if (config.omp.thinking && !THINKING.has(config.omp.thinking)) {
+    throw new Error(`Unsupported OMP thinking level: ${config.omp.thinking}`);
+  }
+  if (!config.signal || typeof config.signal.url !== "string") throw new Error("signal.url must be a URL");
+  try {
+    const signalUrl = new URL(config.signal.url);
+    if (!new Set(["http:", "https:"]).has(signalUrl.protocol)) throw new Error();
+  } catch {
+    throw new Error("signal.url must be an HTTP(S) URL");
+  }
+  if (!Array.isArray(config.signal.allowedSenders) || !config.signal.allowedSenders.every((value) => typeof value === "string")) {
+    throw new Error("signal.allowedSenders must be an array of strings");
+  }
+  if (!Array.isArray(config.signal.allowedGroups) || !config.signal.allowedGroups.every((value) => typeof value === "string")) {
+    throw new Error("signal.allowedGroups must be an array of strings");
+  }
+  if (config.signal.enabled) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.signal.accountEnv)) {
+      throw new Error("signal.accountEnv must name an environment variable");
+    }
+    const account = process.env[config.signal.accountEnv]?.trim();
+    if (!account) throw new Error(`signal.enabled requires ${config.signal.accountEnv} in ${envPath()}`);
+    if (config.signal.allowedSenders.length === 0 && config.signal.allowedGroups.length === 0) {
+      throw new Error("Signal is fail-closed: configure at least one allowed sender or group");
+    }
+  }
+  if (!config.integrations || typeof config.integrations.servicesRoot !== "string" || !config.integrations.servicesRoot.trim()) {
+    throw new Error("integrations.servicesRoot must be a non-empty path");
+  }
+  if (!Number.isInteger(config.scheduler.pollSeconds) || config.scheduler.pollSeconds < 1 || config.scheduler.pollSeconds > 60) {
+    throw new Error("scheduler.pollSeconds must be an integer from 1 to 60");
+  }
+  if (!Number.isInteger(config.security.approvalTimeoutSeconds) || config.security.approvalTimeoutSeconds < 30) {
+    throw new Error("security.approvalTimeoutSeconds must be an integer of at least 30");
+  }
+  const loopback = new Set(["127.0.0.1", "::1", "localhost"]);
+  if (!loopback.has(config.listen.host) && !process.env[config.listen.tokenEnv]?.trim()) {
+    throw new Error(`Non-loopback listen host requires ${config.listen.tokenEnv}`);
+  }
+}
+
+export function readEnvFile(file: string): Record<string, string> {
+  if (!existsSync(file)) return {};
+  const result: Record<string, string> = {};
+  for (const raw of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const separator = line.indexOf("=");
+    if (separator < 1) continue;
+    const key = line.slice(0, separator).trim();
+    let value = line.slice(separator + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    result[key] = value;
+  }
+  return result;
+}
