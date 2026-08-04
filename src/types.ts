@@ -23,7 +23,31 @@ export interface PersephoneConfig {
     accountEnv: string;
     allowedSenders: string[];
     allowedGroups: string[];
+    allowAll: boolean;
     typing: boolean;
+  };
+  discord: {
+    enabled: boolean;
+    tokenEnv: string;
+    allowedUsers: string[];
+    allowedGuilds: string[];
+    allowedChannels: string[];
+    allowAll: boolean;
+    requireMention: boolean;
+  };
+  slack: {
+    enabled: boolean;
+    botTokenEnv: string;
+    appTokenEnv: string;
+    allowedUsers: string[];
+    allowedTeams: string[];
+    allowedChannels: string[];
+    allowAll: boolean;
+    requireMention: boolean;
+  };
+  roboomp: {
+    enabled: boolean;
+    url: string;
   };
   integrations: {
     servicesRoot: string;

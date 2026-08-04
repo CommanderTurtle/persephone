@@ -4,21 +4,21 @@ Persephone assumes one trusted local owner and treats every transported message,
 
 ## Enforced boundaries
 
-1. Signal is disabled by default.
-2. Signal startup fails unless a sender or group allowlist is nonempty.
+1. Signal, Discord, and Slack are disabled by default.
+2. Each enabled transport fails startup unless an allowlist is nonempty or its explicit `allowAll` switch is set.
 3. Direct messages and groups have separate route keys.
 4. Remote approval IDs are bound to the originating route and expire.
 5. A restart expires in-flight approvals rather than recovering them permissively.
 6. The control API binds to loopback by default.
 7. A non-loopback bind is rejected without a bearer token.
-8. OMP RPC confirmation requests fail closed when Signal is unavailable.
+8. OMP RPC confirmation requests fail closed when the originating transport is unavailable.
 9. OMP's native tool policies still run before execution.
 10. SQLite/config/state directories use owner-only modes where the platform permits.
 11. OpenTelemetry is disabled in both the daemon and RPC children.
 12. Self-hosted Firecrawl fails closed by default; a local outage does not silently disclose a query to a hosted provider.
 13. Firecrawl and Camofox API keys are read only from the owner-only Persephone environment file and are not written to logs.
 
-A Signal group is one shared route. Any member of an allowlisted group can respond to that route's pending approval prompt; use a direct-message allowlist for owner-only approval control.
+A Signal group or shared Discord/Slack channel is one shared route. Any permitted member of that route can respond to its pending approval prompt; use an allowlisted direct message for owner-only approval control. Slack threads are isolated from their parent channel, and Discord thread channels have their own route.
 
 ## Trusted-code boundary
 
@@ -37,11 +37,14 @@ Remote message authorization is not tool authorization. Set OMP's `tools.approva
 Persephone itself makes network calls only to:
 
 - the configured local Signal HTTP endpoint;
+- Discord's Gateway and REST API, only when Discord is enabled;
+- Slack's Socket Mode and Web API, only when Slack is enabled;
 - the configured local control endpoint when its OMP extension queries status;
 - the configured Firecrawl search endpoint;
 - the configured Camofox health endpoint;
+- the configured local roboomp health endpoint, only when its integration is enabled;
 - whatever model/MCP endpoints OMP itself is configured to use.
 
 The default Firecrawl and Camofox addresses are loopback. Operators may choose another trusted LAN URL, but should enable each service's authentication and populate its corresponding environment key before doing so. `web.firecrawl.nativeFallback` is deliberately false in the shipped configuration.
 
-It does not start OMP Collab, a remote relay, analytics, or a credential broker.
+Discord and Slack necessarily send their enabled channel traffic to those platforms. They are opt-in and do not create a third-party relay beyond the platform the operator selected. It does not start OMP Collab, another remote relay, analytics, or a credential broker. GitHub credentials remain inside roboomp's `gh-proxy` boundary and are never read by Persephone.

@@ -119,7 +119,7 @@ function schedule(args: string[]): void {
       return;
     }
     if (action !== "add" || rest.length < 3) {
-      throw new Error('Usage: persephone schedule add NAME "CRON" "PROMPT" [--to signal:PEER] [--cwd PATH] [--profile NAME]');
+      throw new Error('Usage: persephone schedule add NAME "CRON" "PROMPT" [--to CHANNEL:PEER] [--cwd PATH] [--profile NAME]');
     }
     const [name, cron, prompt, ...options] = rest as [string, string, string, ...string[]];
     validateCron(cron);
@@ -261,7 +261,7 @@ function help(): void {
   persephone install-service [--start]
   persephone start | stop | restart
   persephone schedule list
-  persephone schedule add NAME "CRON" "PROMPT" [--to signal:PEER]
+  persephone schedule add NAME "CRON" "PROMPT" [--to CHANNEL:PEER]
   persephone schedule remove NAME
   persephone route list
   persephone zed [DIRECTORY]

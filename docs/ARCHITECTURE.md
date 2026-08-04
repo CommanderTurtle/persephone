@@ -1,9 +1,9 @@
 # Architecture
 
 ```text
-Signal HTTP/SSE       cron       local API
-       │                │           │
-       └──────── durable SQLite ─────┘
+Signal  Discord  Slack       cron       local API
+   │       │       │           │           │
+   └───────┴───────┴──── durable SQLite ───┘
                  inbox / outbox
                  routes / jobs
                  approvals
@@ -36,7 +36,7 @@ Signal HTTP/SSE       cron       local API
 - mapping a stable channel/thread identity to an OMP session file;
 - durable inbound and outbound message state;
 - schedule persistence and missed crash recovery;
-- Signal transport and allowlists;
+- separate Signal, Discord, and Slack transports and allowlists;
 - correlation of RPC extension UI requests with remote replies;
 - a small status/control API and systemd unit.
 
@@ -47,6 +47,7 @@ Signal HTTP/SSE       cron       local API
 - Context Mode: bulk corpus/output containment;
 - Codebase Memory: code graph, coverage and architecture queries;
 - Camofox: agent browser transport.
+- OMP roboomp: GitHub webhook, issue/PR automation, isolated worktrees, and GitHub credentials.
 
 ## Web ownership
 
@@ -69,11 +70,11 @@ inbox:  pending → running → done|failed
 outbox: pending → sending → sent|failed
 ```
 
-An interrupted `running`/`sending` row returns to `pending` on daemon startup. Signal message IDs are unique per channel, so reconnecting the SSE stream cannot duplicate accepted events.
+An interrupted `running`/`sending` row returns to `pending` on daemon startup. Upstream event IDs are unique per transport, so an SSE or WebSocket reconnect cannot duplicate accepted events.
 
 ## Approvals
 
-RPC `extension_ui_request` dialogs are not auto-approved. Noninteractive notifications can be delivered; confirmation/input requests create a durable approval record, emit a Signal prompt, and wait for a reply from the same route. Unknown, expired, or cross-route IDs are denied. If Signal is disabled, confirmation fails closed.
+RPC `extension_ui_request` dialogs are not auto-approved. Noninteractive notifications can be delivered; confirmation/input requests create a durable approval record, emit a prompt on the originating transport, and wait for a reply from that exact transport and route. Unknown, expired, or cross-route IDs are denied. If the originating route has no live transport, confirmation fails closed.
 
 This mechanism complements rather than replaces OMP approval policy. A user-level `tools.approval.<tool>: deny` still prevents the call before remote interaction.
 

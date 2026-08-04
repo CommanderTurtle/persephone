@@ -1,15 +1,13 @@
 import type { JsonObject, PersephoneConfig } from "./types.ts";
+import type { ChatTransport, TransportInbound } from "./transport.ts";
+import { sleep } from "./transport.ts";
 
-export interface SignalInbound {
-  peerId: string;
-  senderId: string;
-  messageId: string;
-  body: string;
-  receivedAt: number;
+export interface SignalInbound extends TransportInbound {
   isGroup: boolean;
 }
 
-export class SignalClient {
+export class SignalClient implements ChatTransport {
+  readonly channel = "signal";
   private readonly account: string;
 
   constructor(private readonly config: PersephoneConfig["signal"]) {
@@ -109,8 +107,8 @@ function parseInbound(value: unknown, account: string, config: PersephoneConfig[
   const groupId = firstString(asObject(data.groupInfo).groupId);
   const isGroup = Boolean(groupId);
   if (isGroup) {
-    if (!config.allowedGroups.includes(groupId)) return null;
-  } else if (!config.allowedSenders.includes(sender)) {
+    if (!config.allowAll && !config.allowedGroups.includes(groupId)) return null;
+  } else if (!config.allowAll && !config.allowedSenders.includes(sender)) {
     return null;
   }
   const timestamp = Number(envelope.timestamp ?? data.timestamp ?? Date.now());
@@ -131,14 +129,4 @@ function asObject(value: unknown): JsonObject {
 function firstString(...values: unknown[]): string {
   for (const value of values) if (typeof value === "string" && value) return value;
   return "";
-}
-
-async function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal.addEventListener("abort", () => {
-      clearTimeout(timer);
-      resolve();
-    }, { once: true });
-  });
 }

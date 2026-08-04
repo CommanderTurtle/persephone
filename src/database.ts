@@ -17,6 +17,7 @@ export interface ApprovalRecord {
   id: number;
   workerKey: string;
   requestId: string;
+  channel: string;
   peerId: string;
   method: string;
   title: string;
@@ -106,6 +107,7 @@ export class PersephoneDatabase {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         worker_key TEXT NOT NULL,
         request_id TEXT NOT NULL,
+        channel TEXT NOT NULL DEFAULT 'signal',
         peer_id TEXT NOT NULL,
         method TEXT NOT NULL,
         title TEXT NOT NULL,
@@ -127,6 +129,10 @@ export class PersephoneDatabase {
         last_seen INTEGER NOT NULL
       );
     `);
+    const approvalColumns = (this.db.query("PRAGMA table_info(approvals)").all() as Array<{ name: string }>).map((column) => column.name);
+    if (!approvalColumns.includes("channel")) {
+      this.db.run("ALTER TABLE approvals ADD COLUMN channel TEXT NOT NULL DEFAULT 'signal'");
+    }
   }
 
   private recoverInterruptedWork(): void {
@@ -292,10 +298,10 @@ export class PersephoneDatabase {
     const now = Date.now();
     const result = this.db
       .query(`
-        INSERT INTO approvals(worker_key, request_id, peer_id, method, title, message, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO approvals(worker_key, request_id, channel, peer_id, method, title, message, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      .run(input.workerKey, input.requestId, input.peerId, input.method, input.title, input.message, now, input.expiresAt);
+      .run(input.workerKey, input.requestId, input.channel, input.peerId, input.method, input.title, input.message, now, input.expiresAt);
     return { ...input, id: Number(result.lastInsertRowid), status: "pending" };
   }
 
@@ -402,6 +408,7 @@ function mapApproval(row: Record<string, unknown>): ApprovalRecord {
     id: Number(row.id),
     workerKey: String(row.worker_key),
     requestId: String(row.request_id),
+    channel: String(row.channel || "signal"),
     peerId: String(row.peer_id),
     method: String(row.method),
     title: String(row.title),

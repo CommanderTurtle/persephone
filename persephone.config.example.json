@@ -18,7 +18,31 @@
     "accountEnv": "SIGNAL_ACCOUNT",
     "allowedSenders": [],
     "allowedGroups": [],
+    "allowAll": false,
     "typing": true
+  },
+  "discord": {
+    "enabled": false,
+    "tokenEnv": "DISCORD_BOT_TOKEN",
+    "allowedUsers": [],
+    "allowedGuilds": [],
+    "allowedChannels": [],
+    "allowAll": false,
+    "requireMention": true
+  },
+  "slack": {
+    "enabled": false,
+    "botTokenEnv": "SLACK_BOT_TOKEN",
+    "appTokenEnv": "SLACK_APP_TOKEN",
+    "allowedUsers": [],
+    "allowedTeams": [],
+    "allowedChannels": [],
+    "allowAll": false,
+    "requireMention": true
+  },
+  "roboomp": {
+    "enabled": false,
+    "url": "http://127.0.0.1:8080"
   },
   "integrations": {
     "servicesRoot": "~/Hermes",

@@ -15,6 +15,8 @@ This matrix is the implementation answer to the original OMP migration analysis.
 |Always-on process supervision|Persephone|Implemented with systemd + worker pool|
 |Durable inbox/outbox|Persephone|Implemented with SQLite WAL|
 |Signal direct/group messaging|Persephone + signal-cli|Implemented, allowlist-only|
+|Discord DM/channel/thread messaging|Persephone|Implemented with Gateway v10 + REST, mention-gated and allowlist-only|
+|Slack DM/channel/thread messaging|Persephone|Implemented with Socket Mode + Web API, mention-gated and allowlist-only|
 |Remote approvals|Persephone + OMP RPC UI|Implemented, route-bound and expiring|
 |Durable cron|Persephone|Implemented, five-field local-time cron|
 |Health/control endpoint|Persephone|Implemented, loopback by default|
@@ -32,6 +34,7 @@ This matrix is the implementation answer to the original OMP migration analysis.
 |`pi-gateway`|Third party|Excluded: outdated runtime and prompt-only policy boundary|
 |`remote-pi` cloud relay|Third party|Excluded: plaintext relay and Node runtime conflict with requirements|
 |OMP collaboration relay|OMP|Excluded by default; no cloud relay is started|
+|GitHub issue/PR agent|OMP roboomp|Reused as its independently isolated service; optional health integration|
 
 ## Original analysis: completion check
 
@@ -42,6 +45,8 @@ This matrix is the implementation answer to the original OMP migration analysis.
 - Remote approval correlation: **implemented**.
 - Operational profiles: **uses OMP native profiles**, with per-route selection.
 - Signal gateway: **implemented against signal-cli's local HTTP/SSE API**.
+- Discord and Slack gateways: **implemented as independent Bun-native platform adapters**.
+- GitHub bot: **delegated to OMP's native roboomp implementation, with health integration and no duplicated credentials or webhook path**.
 - Local model support: **left native to OMP**, with route-level provider/model selection.
 - Context Mode, Retrieval, Librarian, Codebase Memory, Camofox: **native integration implemented**.
 - Self-hosted Firecrawl search and Camofox-first browsing: **implemented through native OMP extension seams**.

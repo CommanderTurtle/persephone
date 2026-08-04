@@ -21,7 +21,31 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
     accountEnv: "SIGNAL_ACCOUNT",
     allowedSenders: [],
     allowedGroups: [],
+    allowAll: false,
     typing: true,
+  },
+  discord: {
+    enabled: false,
+    tokenEnv: "DISCORD_BOT_TOKEN",
+    allowedUsers: [],
+    allowedGuilds: [],
+    allowedChannels: [],
+    allowAll: false,
+    requireMention: true,
+  },
+  slack: {
+    enabled: false,
+    botTokenEnv: "SLACK_BOT_TOKEN",
+    appTokenEnv: "SLACK_APP_TOKEN",
+    allowedUsers: [],
+    allowedTeams: [],
+    allowedChannels: [],
+    allowAll: false,
+    requireMention: true,
+  },
+  roboomp: {
+    enabled: false,
+    url: "http://127.0.0.1:8080",
   },
   integrations: {
     servicesRoot: "~/Hermes",
@@ -87,6 +111,9 @@ export function loadConfig(): PersephoneConfig {
     listen: { ...DEFAULT_CONFIG.listen, ...parsed.listen },
     omp: { ...DEFAULT_CONFIG.omp, ...parsed.omp },
     signal: { ...DEFAULT_CONFIG.signal, ...parsed.signal },
+    discord: { ...DEFAULT_CONFIG.discord, ...parsed.discord },
+    slack: { ...DEFAULT_CONFIG.slack, ...parsed.slack },
+    roboomp: { ...DEFAULT_CONFIG.roboomp, ...parsed.roboomp },
     integrations: { ...DEFAULT_CONFIG.integrations, ...parsed.integrations },
     web: {
       ...DEFAULT_CONFIG.web,
@@ -119,7 +146,7 @@ export function ensureConfig(): { config: PersephoneConfig; created: boolean } {
   saveConfig(config);
   const env = envPath();
   if (!existsSync(env)) {
-    writeFileSync(env, "# Local secrets for Persephone\nSIGNAL_ACCOUNT=\nPERSEPHONE_API_TOKEN=\nFIRECRAWL_API_KEY=\nCAMOFOX_API_KEY=\nOTEL_SDK_DISABLED=true\n", {
+    writeFileSync(env, "# Local secrets for Persephone\nSIGNAL_ACCOUNT=\nDISCORD_BOT_TOKEN=\nSLACK_BOT_TOKEN=\nSLACK_APP_TOKEN=\nPERSEPHONE_API_TOKEN=\nFIRECRAWL_API_KEY=\nCAMOFOX_API_KEY=\nOTEL_SDK_DISABLED=true\n", {
       mode: 0o600,
     });
   }
@@ -168,16 +195,55 @@ function validateConfig(config: PersephoneConfig): void {
   if (!Array.isArray(config.signal.allowedGroups) || !config.signal.allowedGroups.every((value) => typeof value === "string")) {
     throw new Error("signal.allowedGroups must be an array of strings");
   }
+  validateBoolean(config.signal.enabled, "signal.enabled");
+  validateBoolean(config.signal.allowAll, "signal.allowAll");
+  validateBoolean(config.signal.typing, "signal.typing");
   if (config.signal.enabled) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.signal.accountEnv)) {
       throw new Error("signal.accountEnv must name an environment variable");
     }
     const account = process.env[config.signal.accountEnv]?.trim();
     if (!account) throw new Error(`signal.enabled requires ${config.signal.accountEnv} in ${envPath()}`);
-    if (config.signal.allowedSenders.length === 0 && config.signal.allowedGroups.length === 0) {
+    if (!config.signal.allowAll && config.signal.allowedSenders.length === 0 && config.signal.allowedGroups.length === 0) {
       throw new Error("Signal is fail-closed: configure at least one allowed sender or group");
     }
   }
+  validateStringArray(config.discord.allowedUsers, "discord.allowedUsers");
+  validateStringArray(config.discord.allowedGuilds, "discord.allowedGuilds");
+  validateStringArray(config.discord.allowedChannels, "discord.allowedChannels");
+  validateEnvName(config.discord.tokenEnv, "discord.tokenEnv");
+  validateBoolean(config.discord.enabled, "discord.enabled");
+  validateBoolean(config.discord.allowAll, "discord.allowAll");
+  validateBoolean(config.discord.requireMention, "discord.requireMention");
+  if (config.discord.enabled) {
+    if (!process.env[config.discord.tokenEnv]?.trim()) {
+      throw new Error(`discord.enabled requires ${config.discord.tokenEnv} in ${envPath()}`);
+    }
+    if (!config.discord.allowAll && !hasAny(config.discord.allowedUsers, config.discord.allowedGuilds, config.discord.allowedChannels)) {
+      throw new Error("Discord is fail-closed: configure an allowlist or set discord.allowAll explicitly");
+    }
+  }
+  validateStringArray(config.slack.allowedUsers, "slack.allowedUsers");
+  validateStringArray(config.slack.allowedTeams, "slack.allowedTeams");
+  validateStringArray(config.slack.allowedChannels, "slack.allowedChannels");
+  validateEnvName(config.slack.botTokenEnv, "slack.botTokenEnv");
+  validateEnvName(config.slack.appTokenEnv, "slack.appTokenEnv");
+  validateBoolean(config.slack.enabled, "slack.enabled");
+  validateBoolean(config.slack.allowAll, "slack.allowAll");
+  validateBoolean(config.slack.requireMention, "slack.requireMention");
+  if (config.slack.enabled) {
+    if (!process.env[config.slack.botTokenEnv]?.trim()) {
+      throw new Error(`slack.enabled requires ${config.slack.botTokenEnv} in ${envPath()}`);
+    }
+    if (!process.env[config.slack.appTokenEnv]?.trim()) {
+      throw new Error(`slack.enabled requires ${config.slack.appTokenEnv} in ${envPath()}`);
+    }
+    if (!config.slack.allowAll && !hasAny(config.slack.allowedUsers, config.slack.allowedTeams, config.slack.allowedChannels)) {
+      throw new Error("Slack is fail-closed: configure an allowlist or set slack.allowAll explicitly");
+    }
+  }
+  validateHttpUrl(config.roboomp.url, "roboomp.url");
+  validateBoolean(config.roboomp.enabled, "roboomp.enabled");
   if (!config.integrations || typeof config.integrations.servicesRoot !== "string" || !config.integrations.servicesRoot.trim()) {
     throw new Error("integrations.servicesRoot must be a non-empty path");
   }
@@ -222,6 +288,20 @@ function validateEnvName(value: string, field: string): void {
   if (typeof value !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
     throw new Error(`${field} must name an environment variable`);
   }
+}
+
+function validateStringArray(value: unknown, field: string): asserts value is string[] {
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string" && entry.trim())) {
+    throw new Error(`${field} must be an array of non-empty strings`);
+  }
+}
+
+function validateBoolean(value: unknown, field: string): asserts value is boolean {
+  if (typeof value !== "boolean") throw new Error(`${field} must be a boolean`);
+}
+
+function hasAny(...values: string[][]): boolean {
+  return values.some((entries) => entries.length > 0);
 }
 
 export function readEnvFile(file: string): Record<string, string> {

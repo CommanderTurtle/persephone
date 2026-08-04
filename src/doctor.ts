@@ -3,7 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { configPath, envPath, readEnvFile } from "./config.ts";
 import { controlRequest } from "./control-client.ts";
+import { DiscordClient } from "./discord.ts";
 import { ompAgentDir, repoRoot } from "./paths.ts";
+import { SlackClient } from "./slack.ts";
 import type { PersephoneConfig } from "./types.ts";
 
 export interface CheckResult {
@@ -96,6 +98,25 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
         results.push({ check: "signal", ok: false, detail: error instanceof Error ? error.message : String(error) });
       }
     }
+    if (config.discord.enabled) {
+      const client = new DiscordClient(config.discord);
+      results.push({
+        check: "discord",
+        ok: await client.health(),
+        detail: `Discord bot token from ${config.discord.tokenEnv}`,
+      });
+    }
+    if (config.slack.enabled) {
+      const client = new SlackClient(config.slack);
+      results.push({
+        check: "slack",
+        ok: await client.health(),
+        detail: `Slack Socket Mode using ${config.slack.botTokenEnv} and ${config.slack.appTokenEnv}`,
+      });
+    }
+    if (config.roboomp.enabled) {
+      results.push(await probeHttpService("roboomp", config.roboomp.url, "/healthz", "", false));
+    }
   }
   return results;
 }
@@ -109,7 +130,7 @@ async function probeHttpService(
 ): Promise<CheckResult> {
   const url = `${baseUrl.replace(/\/+$/, "")}${pathname}`;
   const headers: Record<string, string> = {};
-  const apiKey = process.env[apiKeyEnv]?.trim();
+  const apiKey = apiKeyEnv ? process.env[apiKeyEnv]?.trim() : undefined;
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   try {
     const response = await fetch(url, { headers, signal: AbortSignal.timeout(5000) });

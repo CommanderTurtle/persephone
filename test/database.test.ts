@@ -56,4 +56,23 @@ describe("database", () => {
     expect(db.listSchedules()[0]?.lastStatus).toBe("done");
     db.close();
   });
+
+  test("binds approvals to their originating transport and conversation", () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "persephone-test-"));
+    directories.push(directory);
+    const db = new PersephoneDatabase(path.join(directory, "state.sqlite"));
+    const approval = db.createApproval({
+      workerKey: "slack:channel:C123:thread:100.2",
+      requestId: "request-1",
+      channel: "slack",
+      peerId: "channel:C123:thread:100.2",
+      method: "confirm",
+      title: "Run command",
+      message: "Proceed?",
+      expiresAt: Date.now() + 60_000,
+    });
+    expect(db.getApproval(approval.id)?.channel).toBe("slack");
+    expect(db.getApproval(approval.id)?.peerId).toBe("channel:C123:thread:100.2");
+    db.close();
+  });
 });

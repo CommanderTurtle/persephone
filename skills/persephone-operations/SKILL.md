@@ -7,7 +7,7 @@ description: Operate Persephone's durable OMP gateway, schedules, routes, and he
 
 Use the `persephone` CLI for service lifecycle and durable automation:
 
-- `persephone status` — control-plane, queue, worker, Signal, and schedule status.
+- `persephone status` — control-plane, queue, worker, messaging transport, and schedule status.
 - `persephone doctor` — read-only dependency and integration audit.
 - `persephone schedule list` — list persistent cron prompts.
 - `persephone schedule add NAME CRON PROMPT` — create or replace a schedule.

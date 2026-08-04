@@ -1,12 +1,16 @@
 import type { Server } from "bun";
 import { cronMatches, cronMinute } from "./cron.ts";
 import { PersephoneDatabase } from "./database.ts";
+import { DiscordClient } from "./discord.ts";
 import { OmpWorkerPool, type OmpRpcWorker } from "./rpc.ts";
 import { SignalClient } from "./signal.ts";
+import { SlackClient } from "./slack.ts";
+import type { ChatTransport } from "./transport.ts";
 import type { InboxRecord, JsonObject, PersephoneConfig, RouteRecord, ScheduleRecord, ThinkingLevel } from "./types.ts";
 
 interface PendingApproval {
   workerKey: string;
+  channel: string;
   peerId: string;
   resolve: (response: JsonObject) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -15,7 +19,7 @@ interface PendingApproval {
 export class PersephoneDaemon {
   readonly db: PersephoneDatabase;
   readonly pool: OmpWorkerPool;
-  readonly signalClient?: SignalClient;
+  readonly transports = new Map<string, ChatTransport>();
   private readonly controller = new AbortController();
   private readonly active = new Set<Promise<void>>();
   private readonly approvals = new Map<number, PendingApproval>();
@@ -25,7 +29,9 @@ export class PersephoneDaemon {
   constructor(readonly config: PersephoneConfig) {
     this.db = new PersephoneDatabase();
     this.pool = new OmpWorkerPool(config.omp.maxWorkers, config.omp.idleSeconds * 1000);
-    if (config.signal.enabled) this.signalClient = new SignalClient(config.signal);
+    if (config.signal.enabled) this.registerTransport(new SignalClient(config.signal));
+    if (config.discord.enabled) this.registerTransport(new DiscordClient(config.discord));
+    if (config.slack.enabled) this.registerTransport(new SlackClient(config.slack));
   }
 
   async run(): Promise<void> {
@@ -35,7 +41,9 @@ export class PersephoneDaemon {
       fetch: (request) => this.handleHttp(request),
     });
     console.log(`Persephone listening on http://${this.config.listen.host}:${this.server.port}`);
-    if (this.signalClient) this.startLoop("signal", () => this.signalLoop());
+    for (const transport of this.transports.values()) {
+      this.startLoop(transport.channel, () => this.transportLoop(transport));
+    }
     this.startLoop("inbox", () => this.inboxLoop());
     this.startLoop("outbox", () => this.outboxLoop());
     this.startLoop("scheduler", () => this.schedulerLoop());
@@ -74,9 +82,10 @@ export class PersephoneDaemon {
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
       pid: process.pid,
       workers: this.pool.size,
-      signal: {
-        enabled: Boolean(this.signalClient),
-        url: this.config.signal.url,
+      transports: {
+        signal: { enabled: this.transports.has("signal"), endpoint: this.config.signal.url },
+        discord: { enabled: this.transports.has("discord") },
+        slack: { enabled: this.transports.has("slack") },
       },
       queues: this.db.status(),
     };
@@ -94,10 +103,14 @@ export class PersephoneDaemon {
     void task.finally(() => this.active.delete(task));
   }
 
-  private async signalLoop(): Promise<void> {
-    const client = this.signalClient!;
-    for await (const event of client.events(this.controller.signal)) {
-      this.db.enqueueInbox("signal", event.peerId, event.messageId, event.body, event.receivedAt);
+  private registerTransport(transport: ChatTransport): void {
+    if (this.transports.has(transport.channel)) throw new Error(`Duplicate transport: ${transport.channel}`);
+    this.transports.set(transport.channel, transport);
+  }
+
+  private async transportLoop(transport: ChatTransport): Promise<void> {
+    for await (const event of transport.events(this.controller.signal)) {
+      this.db.enqueueInbox(transport.channel, event.peerId, event.messageId, event.body, event.receivedAt);
     }
   }
 
@@ -121,9 +134,10 @@ export class PersephoneDaemon {
 
       const worker = await this.workerFor(route);
       try {
-        await this.signalClient?.typing(record.peerId, true);
-        const typingTimer = this.signalClient
-          ? setInterval(() => void this.signalClient?.typing(record.peerId, true), 8000)
+        const transport = this.transports.get(record.channel);
+        await this.setTyping(transport, record.peerId, true);
+        const typingTimer = transport
+          ? setInterval(() => void this.setTyping(transport, record.peerId, true), 8000)
           : undefined;
         try {
           this.db.updateWorker(worker.options.key, worker.sessionPath, worker.pid, route.profile, route.cwd, "busy");
@@ -132,7 +146,7 @@ export class PersephoneDaemon {
           this.reply(record, result.text || "OMP completed the turn without a text response.");
         } finally {
           if (typingTimer) clearInterval(typingTimer);
-          await this.signalClient?.typing(record.peerId, false);
+          await this.setTyping(transport, record.peerId, false);
         }
       } finally {
         worker.release();
@@ -161,6 +175,15 @@ export class PersephoneDaemon {
     );
   }
 
+  private async setTyping(transport: ChatTransport | undefined, peerId: string, active: boolean): Promise<void> {
+    if (!transport) return;
+    try {
+      await transport.typing(peerId, active);
+    } catch (error) {
+      console.error(`[${transport.channel}:typing] ${formatError(error)}`);
+    }
+  }
+
   private async workerFor(route: RouteRecord): Promise<OmpRpcWorker> {
     const key = `${route.channel}:${route.peerId}`;
     const worker = await this.pool.acquire({
@@ -173,7 +196,7 @@ export class PersephoneDaemon {
       model: route.model,
       thinking: route.thinking,
       onSession: (sessionPath) => this.db.updateSession(route.channel, route.peerId, sessionPath),
-      onUiRequest: (request) => this.handleUiRequest(key, route.peerId, request),
+      onUiRequest: (request) => this.handleUiRequest(key, route.channel, route.peerId, request),
       onExit: () => {
         this.db.markWorkerStopped(key);
         this.cancelWorkerApprovals(key);
@@ -255,7 +278,7 @@ export class PersephoneDaemon {
         if (!Number.isInteger(id)) return `Usage: ${command} ID`;
         const pending = this.approvals.get(id);
         const stored = this.db.getApproval(id);
-        if (!pending || !stored || stored.peerId !== record.peerId || stored.status !== "pending") {
+        if (!pending || !stored || stored.channel !== record.channel || stored.peerId !== record.peerId || stored.status !== "pending") {
           return `Approval ${id} is not pending for this conversation.`;
         }
         const approved = command === "/approve";
@@ -275,7 +298,7 @@ export class PersephoneDaemon {
     }
   }
 
-  private async handleUiRequest(workerKey: string, peerId: string, request: JsonObject): Promise<JsonObject> {
+  private async handleUiRequest(workerKey: string, channel: string, peerId: string, request: JsonObject): Promise<JsonObject> {
     const method = String(request.method || "");
     if (method === "cancel") {
       const targetId = String(request.targetId || "");
@@ -294,18 +317,18 @@ export class PersephoneDaemon {
     if (["notify", "setStatus", "setWidget", "setTitle", "set_editor_text", "open_url"].includes(method)) {
       if (method === "notify") {
         const message = String(request.message || request.title || "OMP notification");
-        this.db.enqueueOutbox("signal", peerId, message);
+        if (this.transports.has(channel)) this.db.enqueueOutbox(channel, peerId, message);
       }
       return { cancelled: true };
     }
-    if (!this.signalClient) return method === "confirm" ? { confirmed: false } : { cancelled: true };
+    if (!this.transports.has(channel)) return method === "confirm" ? { confirmed: false } : { cancelled: true };
     const requestId = String(request.id || "");
     const title = String(request.title || "OMP approval");
     const message = String(request.message || request.prompt || method);
     const expiresAt = Date.now() + this.config.security.approvalTimeoutSeconds * 1000;
-    const approval = this.db.createApproval({ workerKey, requestId, peerId, method, title, message, expiresAt });
+    const approval = this.db.createApproval({ workerKey, requestId, channel, peerId, method, title, message, expiresAt });
     this.db.enqueueOutbox(
-      "signal",
+      channel,
       peerId,
       `[Approval ${approval.id}] ${title}\n${message}\nReply /approve ${approval.id} or /deny ${approval.id}.`,
     );
@@ -315,7 +338,7 @@ export class PersephoneDaemon {
         this.db.resolveApproval(approval.id, { cancelled: true, timedOut: true }, "denied");
         resolve(method === "confirm" ? { confirmed: false } : { cancelled: true, timedOut: true });
       }, this.config.security.approvalTimeoutSeconds * 1000);
-      this.approvals.set(approval.id, { workerKey, peerId, resolve, timer });
+      this.approvals.set(approval.id, { workerKey, channel, peerId, resolve, timer });
     });
   }
 
@@ -330,7 +353,7 @@ export class PersephoneDaemon {
   }
 
   private reply(record: InboxRecord, body: string): void {
-    if (record.channel === "signal") this.db.enqueueOutbox("signal", record.peerId, body, record.id);
+    if (this.transports.has(record.channel)) this.db.enqueueOutbox(record.channel, record.peerId, body, record.id);
     else console.log(`[${record.channel}:${record.peerId}] ${body}`);
   }
 
@@ -339,8 +362,9 @@ export class PersephoneDaemon {
       const records = this.db.claimOutbox(16);
       for (const record of records) {
         try {
-          if (record.channel !== "signal" || !this.signalClient) throw new Error(`Unsupported delivery channel: ${record.channel}`);
-          await this.signalClient.send(record.peerId, record.body);
+          const transport = this.transports.get(record.channel);
+          if (!transport) throw new Error(`Unsupported delivery channel: ${record.channel}`);
+          await transport.send(record.peerId, record.body);
           this.db.finishOutbox(record.id);
         } catch (error) {
           this.db.finishOutbox(record.id, formatError(error), record.attempts < 5);

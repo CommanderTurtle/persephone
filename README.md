@@ -10,8 +10,8 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 
 - Persistent `omp --mode rpc` workers that resume the correct OMP session after restart.
 - Durable SQLite inbox/outbox with crash recovery and bounded retries.
-- Signal support through an existing local `signal-cli` HTTP/SSE daemon.
-- Standard five-field cron prompts with optional Signal delivery.
+- Separate Signal, Discord, and Slack transports with one durable OMP routing contract.
+- Standard five-field cron prompts with optional delivery to any enabled transport.
 - Conversation-bound `/approve` and `/deny` replies for headless OMP UI requests.
 - Mid-turn `/steer`, queued `/follow`, `/model`, `/thinking`, `/cwd`, and `/new` controls.
 - A local authenticated health/control API.
@@ -25,7 +25,7 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 
 OMP already provides editing, Hashline snapshots, LSP, plan-mode enforcement, tasks, subagents, swarm DAGs, async jobs, artifacts, compaction, ACP, model routing, MCP, skills, rules, and extension hooks. Persephone does not wrap or reimplement any of those. Its two web substitutions use OMP's documented same-name tool registration: the built-in `web_search` schema is retained while transport goes to local Firecrawl, and the incompatible Chromium tool is made inactive in favor of Camofox's native MCP surface.
 
-It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, Mnemopi, or another memory database. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the Signal transport contract, but Hermes is not a runtime dependency.
+It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, Mnemopi, or another memory database. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the platform-adapter boundary, but Hermes is not a runtime dependency. GitHub issue automation remains OMP's native `roboomp` service rather than a second, less-isolated implementation inside Persephone.
 
 ## Install
 
@@ -35,7 +35,8 @@ Prerequisites:
 - Bun 1.3.14 or newer (Sandwich is supported);
 - a working, configured vanilla `omp` command;
 - optional repositories under `~/Hermes` for the integrations you enable;
-- optional `signal-cli` HTTP daemon for Signal.
+- optional `signal-cli` HTTP daemon for Signal;
+- optional Discord bot or Slack Socket Mode app credentials for those channels.
 
 ```bash
 git clone https://github.com/CommanderTurtle/persephone.git ~/Hermes/persephone
@@ -63,7 +64,7 @@ The full `persephone doctor` additionally asks OMP itself to connect to the isol
 
 If no provider, model, or thinking level is set in Persephone, each new route inherits the selected OMP profile's native defaults.
 
-Signal is disabled by default and fails closed. Enabling it requires `SIGNAL_ACCOUNT` and at least one explicit `allowedSenders` or `allowedGroups` entry.
+Every messaging transport is disabled by default and fails closed. Signal requires `SIGNAL_ACCOUNT`; Discord requires `DISCORD_BOT_TOKEN`; Slack requires both `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN`. Each enabled transport also requires an explicit user/group/server/channel allowlist unless its own `allowAll` flag is deliberately set.
 Leave it disabled while Hermes owns the same Signal account. During a cutover, stop the Hermes gateway first, enable Persephone's allowlists/account, and then start Persephone so only one SSE consumer can route a message.
 
 ## Existing integrations
@@ -88,7 +89,21 @@ Camofox is HTTP/MCP rather than CDP, so it cannot honestly emulate OMP's arbitra
 
 Existing OMP MCP entries and config keys are preserved. Their pre-Persephone values are recorded once and restored by `persephone uninstall`. A malformed OMP config is never overwritten. The private Librarian profile receives a managed copy of the active profile's OMP settings/model definitions, but not its sessions, MCP registry, model cache, or credential database. Librarian's Hermes configuration is not changed; the OMP MCP receives explicit environment overrides, so both backends can coexist.
 
-## Signal commands
+## Messaging gateway
+
+The three transports are independent adapters:
+
+|Channel|Native protocol|Conversation route|
+|---|---|---|
+|Signal|Local signal-cli JSON-RPC + SSE|Contact or group|
+|Discord|Gateway v10 WebSocket + REST|DM, channel, or Discord thread channel|
+|Slack|Socket Mode WebSocket + Web API|DM, channel, or Slack thread|
+
+Discord needs the Message Content privileged intent. Grant only View Channels, Send Messages, and Read Message History where the bot is meant to operate. With `requireMention: true` (the default), guild traffic is accepted only when the bot is mentioned; direct messages do not need a mention.
+
+For Slack, enable Socket Mode, give the app token `connections:write`, and subscribe the bot to `app_mention` and `message.im`. Grant `app_mentions:read`, `chat:write`, and the history scopes for only the channel types you intend to use. If `requireMention` is disabled, subscribe to the corresponding channel message events as well.
+
+Commands are identical on every channel:
 
 ```text
 /status
@@ -102,18 +117,24 @@ Existing OMP MCP entries and config keys are preserved. Their pre-Persephone val
 /deny 12
 ```
 
-Ordinary messages enter the OMP session mapped to that Signal contact or group. Group and direct-message routes are distinct.
+Ordinary messages enter the OMP session mapped to that channel conversation. DMs, channels, Signal groups, Discord thread channels, and Slack threads remain distinct. Approval replies are accepted only from the exact originating transport and route.
 
 ## Durable schedules
 
 ```bash
 persephone schedule add morning "0 8 * * *" "Review the project task sheet"
 persephone schedule add report "30 18 * * 1-5" "Summarize today's work" --to signal:+15555550123
+persephone schedule add review "0 9 * * 1" "Review open work" --to discord:channel:1234567890
+persephone schedule add audit "0 17 * * 5" "Audit this week" --to slack:channel:C123456
 persephone schedule list
 persephone schedule remove morning
 ```
 
 Cron is evaluated in the service's local timezone. A minute is recorded before it can run twice, and failures remain visible in SQLite/status output.
+
+## GitHub automation
+
+OMP already ships `python/robomp`, a purpose-built GitHub issue/PR orchestrator with webhook HMAC verification, allowlisted repositories, durable SQLite state, per-issue OMP RPC sessions, isolated worktrees, and a credential-holding `gh-proxy` sidecar. Persephone deliberately reuses that service instead of treating GitHub as a chat channel. Set `roboomp.enabled` after deploying it and `persephone doctor` will include its local `/healthz` endpoint. See [GitHub bot integration](docs/GITHUB-BOT.md).
 
 ## Zed
 
@@ -144,7 +165,7 @@ persephone uninstall
 - `OTEL_SDK_DISABLED=true` is forced for the daemon and every OMP RPC child.
 - No collaboration relay is started.
 - The API defaults to loopback. Non-loopback binding requires a bearer token.
-- Signal is allowlist-only.
+- Signal, Discord, and Slack are allowlist-only unless their explicit `allowAll` switch is set.
 - Approval IDs are bound to the originating conversation and expire.
 - OMP's own per-tool approval policy remains authoritative.
 - OMP extensions execute as trusted in-process code. Install Persephone only from a reviewed source tree.
