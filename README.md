@@ -57,10 +57,12 @@ persephone install-service --start
 ```
 
 `persephone doctor --integration-only` is the non-service verification used by dashboard installers; it does not require the daemon or Signal to be running.
+The full `persephone doctor` additionally asks OMP itself to connect to the isolated Librarian MCP and report its tool count; it does not send a model prompt.
 
 If no provider, model, or thinking level is set in Persephone, each new route inherits the selected OMP profile's native defaults.
 
 Signal is disabled by default and fails closed. Enabling it requires `SIGNAL_ACCOUNT` and at least one explicit `allowedSenders` or `allowedGroups` entry.
+Leave it disabled while Hermes owns the same Signal account. During a cutover, stop the Hermes gateway first, enable Persephone's allowlists/account, and then start Persephone so only one SSE consumer can route a message.
 
 ## Existing integrations
 

@@ -56,6 +56,7 @@ export class SignalClient {
             if (parsed) yield parsed;
           }
         }
+        if (!signal.aborted) await sleep(2000 + Math.floor(Math.random() * 1000), signal);
       } catch (error) {
         if (signal.aborted) return;
         console.error(`[signal] ${error instanceof Error ? error.message : String(error)}`);

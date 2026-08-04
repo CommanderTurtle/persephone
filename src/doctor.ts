@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { configPath, envPath } from "./config.ts";
+import { configPath, envPath, readEnvFile } from "./config.ts";
 import { controlRequest } from "./control-client.ts";
 import { ompAgentDir, repoRoot } from "./paths.ts";
 import type { PersephoneConfig } from "./types.ts";
@@ -41,6 +41,15 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
   for (const name of expectedMcpNames(config)) {
     results.push({ check: `mcp:${name}`, ok: mcpNames.includes(name), detail: mcpFile });
   }
+  const librarian = librarianIntegration(config);
+  if (librarian) {
+    const privateFile = path.join(ompAgentDir(librarian.profile), "mcp.json");
+    results.push({
+      check: "mcp:librarian-okf",
+      ok: readMcpNames(privateFile).includes("librarian-okf"),
+      detail: privateFile,
+    });
+  }
   if (config.integrations.contextMode) {
     const packageFile = path.join(config.integrations.servicesRoot, "context-mode", "package.json");
     const packageName = readPackageName(packageFile);
@@ -52,6 +61,9 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
   }
 
   if (includeRuntime) {
+    if (librarian && omp) {
+      results.push(probeLibrarianMcp(omp, librarian.profile));
+    }
     try {
       const status = await controlRequest<Record<string, unknown>>(config, "/health");
       results.push({ check: "daemon", ok: status.ok === true, detail: `http://${config.listen.host}:${config.listen.port}` });
@@ -68,6 +80,47 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
     }
   }
   return results;
+}
+
+function librarianIntegration(config: PersephoneConfig): { profile: string } | null {
+  if (!config.integrations.librarian) return null;
+  const environment = readEnvFile(path.join(config.integrations.servicesRoot, "librarian", ".env"));
+  return { profile: environment.OMP_PROFILE || "librarian" };
+}
+
+function probeLibrarianMcp(omp: string, profile: string): CheckResult {
+  const request = [
+    JSON.stringify({ id: "protocol", type: "negotiate_protocol", protocolVersion: 2 }),
+    JSON.stringify({ id: "probe", type: "prompt", message: "/mcp test librarian-okf" }),
+    "",
+  ].join("\n");
+  const probe = spawnSync(omp, ["--profile", profile, "--mode", "rpc", "--no-session"], {
+    encoding: "utf8",
+    input: request,
+    timeout: 30_000,
+    maxBuffer: 4 * 1024 * 1024,
+    env: { ...process.env, OTEL_SDK_DISABLED: "true", VLLM_API_KEY: process.env.VLLM_API_KEY || "local" },
+  });
+  const output = `${probe.stdout || ""}\n${probe.stderr || ""}`;
+  const message = output
+    .split(/\r?\n/)
+    .map(readCommandOutput)
+    .find((value) => value.includes('Server "librarian-okf"'));
+  const ok = probe.status === 0 && Boolean(message?.includes(" connected ("));
+  return {
+    check: "mcp:librarian-okf:runtime",
+    ok,
+    detail: message || (probe.error?.message ?? `OMP RPC exited ${probe.status ?? "without a status"}`),
+  };
+}
+
+function readCommandOutput(line: string): string {
+  try {
+    const value = JSON.parse(line) as { type?: unknown; text?: unknown };
+    return value.type === "command_output" && typeof value.text === "string" ? value.text : "";
+  } catch {
+    return "";
+  }
 }
 
 function readPluginNames(output: string): string[] {
