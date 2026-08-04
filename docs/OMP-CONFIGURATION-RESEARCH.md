@@ -290,7 +290,7 @@ Leave `/collab` unused, or point its relay URL at an operator-owned service if c
 
 ## Current configuration proposal
 
-This is the recommended proposal for the normal workstation profile. It has not been applied by this research pass.
+This is the normal workstation profile applied on August 3, 2026.
 
 ```yaml
 modelRoles:
@@ -340,6 +340,57 @@ features:
 ```
 
 Keep the current project/profile settings, local model catalog, and MCP registry intact around this patch. Do not replace the Firecrawl extension with OMP's hosted Firecrawl provider, and do not enable OMP's built-in Chromium browser while Camofox is authoritative.
+
+### Native command sequence
+
+OMP's config CLI treats `modelRoles` as one record, so set that value atomically. Every other recommendation is an ordinary native setting:
+
+```bash
+omp config set modelRoles '{"default":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","advisor":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","task":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym"}'
+
+omp config set advisor.enabled true
+omp config set advisor.subagents false
+omp config set advisor.syncBacklog 1
+omp config set advisor.immuneTurns 3
+
+omp config set compaction.strategy snapcompact
+omp config set inspect_image.mode auto
+omp config set memory.backend off
+
+omp config set task.maxConcurrency 4
+omp config set task.maxRecursionDepth 2
+omp config set task.isolation.mode auto
+omp config set task.batch true
+omp config set prewalk.enabled false
+
+omp config set exa.enabled false
+omp config set exa.enableSearch false
+omp config set exa.enableResearcher false
+omp config set exa.enableWebsets false
+
+omp config set startup.checkUpdate false
+omp config set dev.autoqa false
+omp config set providers.fetch native
+omp config set provider.appendOnlyContext auto
+omp config set tools.xdev true
+omp config set tools.format auto
+omp config set features.unexpectedStopDetection true
+omp config set skills.enableSkillCommands true
+```
+
+The multimodal `models.yml` override is separate because model capability overrides belong to OMP's model registry rather than `config.yml`. After writing it, verify the resolved result with:
+
+```bash
+omp models vllm --json
+```
+
+The selected model must report `"input":["text","image"]`. `/advisor status` should then report Advisor enabled on the same selector. Persephone's native integration is applied and checked with:
+
+```bash
+persephone integrate
+persephone restart
+persephone doctor
+```
 
 ## Prioritized next actions
 
