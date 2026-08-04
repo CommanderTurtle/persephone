@@ -9,6 +9,19 @@
     "type": "git",
     "url": "https://github.com/CommanderTurtle/persephone.git"
   },
+  "homepage": "https://github.com/CommanderTurtle/persephone#readme",
+  "bugs": {
+    "url": "https://github.com/CommanderTurtle/persephone/issues"
+  },
+  "keywords": [
+    "oh-my-pi",
+    "omp",
+    "agent-gateway",
+    "bun",
+    "signal",
+    "discord",
+    "slack"
+  ],
   "bin": {
     "persephone": "./src/cli.ts"
   },
@@ -33,10 +46,8 @@
   "files": [
     "src",
     "scripts",
-    "systemd",
     "rules",
     "skills",
-    "agents",
     "docs",
     ".env.example",
     "persephone.config.example.json",
