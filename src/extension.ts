@@ -3,6 +3,7 @@ import { loadConfig } from "./config.ts";
 import { controlRequest } from "./control-client.ts";
 import type { PersephoneConfig } from "./types.ts";
 import { formatFirecrawlResult, searchLocalFirecrawl, type FirecrawlSearchParams } from "./web.ts";
+import { CamofoxBrowserAdapter, type CamofoxBrowserParams } from "./camofox-browser.ts";
 
 export default function persephoneExtension(pi: ExtensionAPI): void {
   pi.setLabel("Persephone");
@@ -107,7 +108,7 @@ function registerWebTools(pi: ExtensionAPI): void {
     pi.registerTool({
       name: "web_search",
       label: "Web Search (local Firecrawl)",
-      description: "Search the web through the operator's self-hosted Firecrawl API. Firecrawl may use local SearXNG internally; no hosted search provider is contacted unless nativeFallback is explicitly enabled.",
+      description: "Search through the operator's self-hosted Firecrawl API and local SearXNG backend. This tool fails closed and never falls through to a hosted search provider.",
       parameters: z.object({
         query: z.string().min(1).describe("Search query"),
         recency: z.enum(["day", "week", "month", "year"]).optional(),
@@ -119,7 +120,7 @@ function registerWebTools(pi: ExtensionAPI): void {
       approval: "read",
       loadMode: "discoverable",
       strict: true,
-      async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
+      async execute(_toolCallId, rawParams, signal) {
         const params = rawParams as FirecrawlSearchParams;
         try {
           const result = await searchLocalFirecrawl(config, params, { ...(signal ? { signal } : {}) });
@@ -129,12 +130,6 @@ function registerWebTools(pi: ExtensionAPI): void {
           };
         } catch (error) {
           if (signal?.aborted) throw error;
-          if (config.web.firecrawl.nativeFallback && ctx.invokeTool) {
-            return ctx.invokeTool(rawParams as Record<string, unknown>, {
-              ...(signal ? { signal } : {}),
-              ...(onUpdate ? { onUpdate } : {}),
-            });
-          }
           return {
             content: [{ type: "text", text: `Local Firecrawl search failed: ${error instanceof Error ? error.message : String(error)}` }],
             details: { provider: "firecrawl", backend: "self-hosted", fallback: false },
@@ -146,10 +141,11 @@ function registerWebTools(pi: ExtensionAPI): void {
   }
 
   if (config.integrations.camofox && config.web.camofox.replaceNativeBrowser) {
+    const camofox = new CamofoxBrowserAdapter(config);
     pi.registerTool({
       name: "browser",
-      label: "Browser (Camofox MCP)",
-      description: "OMP's Chromium/CDP browser is deliberately inactive. Use the mcp__camofox_* tools for the Camofox browser backend.",
+      label: "Browser (local Camofox)",
+      description: "Control the local Camofox anti-detection browser using OMP's native open, run, and close workflow. The tab/page helpers cover normal observation, navigation, interaction, evaluation, waits, and screenshots. Use mcp__camofox_* tools for Camofox's specialist extraction, download, profile, and batch operations.",
       parameters: z.object({
         action: z.enum(["open", "close", "run"]),
         name: z.string().optional(),
@@ -173,20 +169,21 @@ function registerWebTools(pi: ExtensionAPI): void {
         all: z.boolean().optional(),
         kill: z.boolean().optional(),
       }),
-      hidden: true,
-      defaultInactive: true,
-      approval: "read",
+      approval: "exec",
       loadMode: "discoverable",
-      strict: false,
-      async execute() {
-        return {
-          content: [{
-            type: "text",
-            text: "The native Chromium browser is disabled by Persephone. Use Camofox MCP: mcp__camofox_create_tab or mcp__camofox_navigate_and_snapshot, followed by mcp__camofox_click, mcp__camofox_type_text, mcp__camofox_snapshot, and related tools.",
-          }],
-          details: { backend: "camofox", nativeBrowser: false },
-          isError: true,
-        };
+      strict: true,
+      async execute(_toolCallId, rawParams, signal) {
+        try {
+          const response = await camofox.execute(rawParams as CamofoxBrowserParams, signal);
+          return { content: [{ type: "text", text: response.text }], details: response.details };
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          return {
+            content: [{ type: "text", text: `Local Camofox browser failed: ${error instanceof Error ? error.message : String(error)}` }],
+            details: { backend: "camofox", local: true },
+            isError: true,
+          };
+        }
       },
     });
   }

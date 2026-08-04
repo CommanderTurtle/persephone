@@ -43,6 +43,14 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     detail: linked.status === 0 ? "Linked through omp plugin link" : cleanOutput(linked),
   });
 
+  const interactiveAgent = ompAgentDir(config.omp.interactiveProfile);
+  const workerAgent = ompAgentDir(config.omp.profile);
+  if (interactiveAgent !== workerAgent) {
+    synchronizeProfileConfiguration(interactiveAgent, workerAgent);
+  }
+  configureInteractiveProfile(omp, config.omp.interactiveProfile, results);
+  configureWorkerProfile(omp, config.omp.profile, results);
+
   const services = config.integrations.servicesRoot;
   const publicEntries: Record<string, unknown> = {};
   if (config.integrations.contextMode) {
@@ -105,10 +113,12 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     integrateLibrarian(config, bun, publicEntries, results);
   }
 
-  const publicFile = path.join(ompAgentDir(config.omp.profile), "mcp.json");
-  rememberMcp(publicFile, Object.keys(publicEntries));
-  mergeMcp(publicFile, publicEntries);
-  results.push({ name: "omp-mcp", status: "integrated", detail: publicFile });
+  for (const profile of new Set([config.omp.interactiveProfile, config.omp.profile])) {
+    const publicFile = path.join(ompAgentDir(profile), "mcp.json");
+    rememberMcp(publicFile, Object.keys(publicEntries));
+    mergeMcp(publicFile, publicEntries);
+    results.push({ name: `omp-mcp:${profile}`, status: "integrated", detail: publicFile });
+  }
   return results;
 }
 
@@ -167,11 +177,76 @@ function integrateLibrarian(
       env: { BUNDLE_ROOT: bundleRoot, GIT_AUTOCOMMIT: existing.GIT_AUTOCOMMIT || "false" },
     },
   });
-  synchronizeProfileConfiguration(ompAgentDir(config.omp.profile), privateAgent);
+  synchronizeProfileConfiguration(ompAgentDir(config.omp.interactiveProfile), privateAgent);
+  configureWorkerProfile(resolveExecutable(config.omp.command) || config.omp.command, profile, results, "librarian-profile");
   results.push({
     name: "librarian",
     status: "integrated",
     detail: `Public MCP plus isolated '${profile}' OMP RPC profile`,
+  });
+}
+
+function configureInteractiveProfile(omp: string, profile: string, results: IntegrationResult[]): void {
+  configureProfile(omp, profile, [
+    ["advisor.enabled", "true"],
+    ["advisor.subagents", "false"],
+    ["task.maxConcurrency", "1"],
+    ["memory.backend", "mnemopi"],
+    ["mnemopi.scoping", "per-project"],
+    ["mnemopi.autoRecall", "true"],
+    ["mnemopi.autoRetain", "true"],
+    ["mnemopi.llmMode", "none"],
+    ["mnemopi.enhancedRecall", "true"],
+    ["mnemopi.polyphonicRecall", "false"],
+    ["mnemopi.proactiveLinking", "false"],
+    ["mnemopi.injectionTokenLimit", "2000"],
+    ["mnemopi.recallLimit", "6"],
+    ["exa.enabled", "false"],
+    ["exa.enableSearch", "false"],
+    ["exa.enableResearcher", "false"],
+    ["exa.enableWebsets", "false"],
+    ["providers.fetch", "native"],
+  ], results, `interactive-profile:${profile}`);
+}
+
+function configureWorkerProfile(
+  omp: string,
+  profile: string,
+  results: IntegrationResult[],
+  resultName = `worker-profile:${profile}`,
+): void {
+  configureProfile(omp, profile, [
+    ["advisor.enabled", "false"],
+    ["advisor.subagents", "false"],
+    ["task.maxConcurrency", "1"],
+    ["memory.backend", "off"],
+    ["exa.enabled", "false"],
+    ["exa.enableSearch", "false"],
+    ["exa.enableResearcher", "false"],
+    ["exa.enableWebsets", "false"],
+    ["providers.fetch", "native"],
+  ], results, resultName);
+}
+
+function configureProfile(
+  omp: string,
+  profile: string,
+  values: Array<readonly [string, string]>,
+  results: IntegrationResult[],
+  resultName: string,
+): void {
+  const failures: string[] = [];
+  for (const [key, value] of values) {
+    const args = profile === "default"
+      ? ["config", "set", key, value]
+      : ["--profile", profile, "config", "set", key, value];
+    const command = spawnSync(omp, args, { encoding: "utf8", env: childEnvironment() });
+    if (command.status !== 0) failures.push(`${key}: ${cleanOutput(command)}`);
+  }
+  results.push({
+    name: resultName,
+    status: failures.length ? "failed" : "integrated",
+    detail: failures.length ? failures.join("; ") : "Applied native OMP profile settings",
   });
 }
 

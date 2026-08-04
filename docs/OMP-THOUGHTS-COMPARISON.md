@@ -37,8 +37,8 @@ GitHub is intentionally not treated as a fourth chat transport. OMP already ship
 
 The workstation's two web systems remain separate by design:
 
-- **Firecrawl owns search.** Persephone registers OMP's `web_search` schema against the self-hosted Firecrawl `/v2/search` endpoint. Firecrawl may use the local SearXNG container internally; SearXNG is not exposed as a competing OMP provider. A local outage fails closed unless cloud fallback is explicitly enabled.
-- **Camofox owns browsing and automation.** Its native MCP tools are registered with OMP. OMP's Chromium/Puppeteer browser entry is hidden and inactive so it cannot accidentally become a second browser backend.
+- **Firecrawl owns search.** Persephone registers OMP's `web_search` schema against the self-hosted Firecrawl `/v2/search` endpoint. Firecrawl may use the local SearXNG container internally; SearXNG is not exposed as a competing OMP provider. A local outage always fails closed.
+- **Camofox owns browsing and automation.** Its native MCP tools are registered with OMP, and Persephone's same-name `browser` adapter maps OMP's open/run/close workflow to Camofox's local HTTP control plane. OMP's Chromium/Puppeteer backend never starts.
 
 This is not a Firecrawl-to-browser substitution. Search and interactive browser state have distinct owners.
 
@@ -55,7 +55,7 @@ This is not a Firecrawl-to-browser substitution. Search and interactive browser 
 |Local model|Inherited from OMP's selected profile unless a route deliberately overrides it.|
 |Zed|OMP's native `omp acp` path; Persephone adds only a convenience launcher.|
 
-Mnemopi remains disabled initially. It would create another autonomous recall owner beside Retrieval, Librarian, Context Mode, and Codebase Memory. Nothing prevents enabling it later for narrowly OMP-specific memory, but Persephone does not silently create a second mutable memory database.
+Mnemopi owns narrowly OMP-specific cross-session memory in the interactive profile. It is project-scoped, locally embedded, bounded to a small injection budget, and runs without an auxiliary LLM. Retrieval remains the archived skill/external-corpus owner; Librarian remains delegated synthesis; Context Mode remains bulk working context; Codebase Memory remains the code graph. Mnemopi is disabled in headless Persephone and Librarian profiles so those workers do not create duplicate recall or consume another model sequence.
 
 ## Native OMP features left native
 

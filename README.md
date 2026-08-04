@@ -16,16 +16,16 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 - Mid-turn `/steer`, queued `/follow`, `/model`, `/thinking`, `/cwd`, and `/new` controls.
 - A local authenticated health/control API.
 - Native registration of Context Mode, Librarian, Retrieval, Codebase Memory, and Camofox.
-- Local-first web search through self-hosted Firecrawl, with no cloud fallback by default.
-- Camofox as the authoritative browser surface; OMP's Puppeteer/Chromium tool is removed from the active set.
+- Local-only web search through self-hosted Firecrawl, with no hosted fallback path.
+- A real OMP-compatible `browser` tool backed by local Camofox rather than Puppeteer/Chromium.
 - A small OMP extension with `/persephone`, `persephone_status`, and `persephone_submit`.
 - Zed-first operation through OMP's own `omp acp` bridge.
 
 ## What it deliberately does not add
 
-OMP already provides editing, Hashline snapshots, LSP, plan-mode enforcement, tasks, subagents, swarm DAGs, async jobs, artifacts, compaction, ACP, model routing, MCP, skills, rules, and extension hooks. Persephone does not wrap or reimplement any of those. Its two web substitutions use OMP's documented same-name tool registration: the built-in `web_search` schema is retained while transport goes to local Firecrawl, and the incompatible Chromium tool is made inactive in favor of Camofox's native MCP surface.
+OMP already provides editing, Hashline snapshots, LSP, plan-mode enforcement, tasks, subagents, swarm DAGs, async jobs, artifacts, compaction, ACP, model routing, MCP, skills, rules, and extension hooks. Persephone does not wrap or reimplement any of those. Its two web adapters use OMP's documented same-name tool registration: `web_search` retains OMP's request shape while transport goes to local Firecrawl, and `browser` retains OMP's open/run/close workflow while tab operations go to local Camofox.
 
-It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, Mnemopi, or another memory database. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the platform-adapter boundary, but Hermes is not a runtime dependency. GitHub issue automation remains OMP's native `roboomp` service rather than a second, less-isolated implementation inside Persephone.
+It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, or another memory product. OMP's native Mnemopi backend remains OMP-owned; the interactive profile can use its project-scoped local SQLite memory without involving Persephone. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the platform-adapter boundary, but Hermes is not a runtime dependency. GitHub issue automation remains OMP's native `roboomp` service rather than a second, less-isolated implementation inside Persephone.
 
 ## Install
 
@@ -62,7 +62,7 @@ persephone install-service --start
 `persephone doctor --integration-only` is the non-service verification used by dashboard installers; it does not require the daemon or Signal to be running.
 The full `persephone doctor` additionally asks OMP itself to connect to the isolated Librarian MCP and report its tool count; it does not send a model prompt.
 
-If no provider, model, or thinking level is set in Persephone, each new route inherits the selected OMP profile's native defaults.
+If no provider, model, or thinking level is set in Persephone, each new route inherits the selected OMP worker profile's native defaults. The shipped configuration separates the interactive `default` profile from a `persephone` worker profile. Integration copies model definitions, then disables Advisor and autonomous memory for the headless worker so one background route consumes one model sequence.
 
 Every messaging transport is disabled by default and fails closed. Signal requires `SIGNAL_ACCOUNT`; Discord requires `DISCORD_BOT_TOKEN`; Slack requires both `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN`. Each enabled transport also requires an explicit user/group/server/channel allowlist unless its own `allowAll` flag is deliberately set.
 Leave it disabled while Hermes owns the same Signal account. During a cutover, stop the Hermes gateway first, enable Persephone's allowlists/account, and then start Persephone so only one SSE consumer can route a message.
@@ -83,11 +83,11 @@ Leave it disabled while Hermes owns the same Signal account. During a cutover, s
 
 The default configuration expects Firecrawl at `http://127.0.0.1:3002` and Camofox at `http://127.0.0.1:9377`. `persephone integrate` writes the configured Camofox URL into the OMP MCP entry, so the MCP never relies on a hard-coded home-directory layout. Both services may be keyless on a trusted local host; set `FIRECRAWL_API_KEY` or `CAMOFOX_API_KEY` in `~/.config/persephone/.env` when their local authentication is enabled.
 
-OMP's built-in Firecrawl provider targets `api.firecrawl.dev` and cannot select a self-hosted base URL. Persephone therefore re-registers the same `web_search` tool through OMP's supported extension API and sends the compatible `/v2/search` request to the configured local endpoint. The default is fail-closed: if local Firecrawl is down, search reports that failure rather than silently sending the query to a hosted provider. Set `web.firecrawl.nativeFallback` to `true` only when that cloud/provider fallback is intentional.
+OMP's built-in Firecrawl provider targets `api.firecrawl.dev` and cannot select a self-hosted base URL. Persephone therefore re-registers the same `web_search` tool through OMP's supported extension API and sends the compatible `/v2/search` request to the configured local endpoint. The behavior is fail-closed: if local Firecrawl is down, search reports that failure and never submits the query to a hosted provider. Exa remains disabled because it is a hosted search service rather than software that can be installed locally.
 
-Camofox is HTTP/MCP rather than CDP, so it cannot honestly emulate OMP's arbitrary `browser run` JavaScript contract. Persephone leaves all Camofox MCP tools intact and registers OMP's same-name `browser` tool as hidden and inactive. This prevents Puppeteer from spawning while preserving an explicit diagnostic if an operator manually requests the old tool. A cold Camofox health response with `browserRunning: false` is normal; the browser starts on first use.
+Camofox is HTTP/MCP rather than CDP. Persephone's `browser` adapter maps OMP's named-tab `open`, `run`, and `close` contract onto Camofox's local HTTP API. Browser code runs in a bounded Bun worker with `tab`, `page`, `browser`, `display`, `assert`, and `wait` helpers; normal observation, ref/selector interaction, navigation, evaluation, waits, and screenshots stay compatible. Camofox's MCP remains available for its larger extraction, download, profile, and batch surface. Raw Puppeteer-only APIs are deliberately absent, and Puppeteer never starts. A cold Camofox health response with no browser session is normal; the browser starts on first use.
 
-Existing OMP MCP entries and config keys are preserved. Their pre-Persephone values are recorded once and restored by `persephone uninstall`. A malformed OMP config is never overwritten. The private Librarian profile receives a managed copy of the active profile's OMP settings/model definitions, but not its sessions, MCP registry, model cache, or credential database. Librarian's Hermes configuration is not changed; the OMP MCP receives explicit environment overrides, so both backends can coexist.
+Existing OMP MCP entries and config keys are preserved. Their pre-Persephone values are recorded once and restored by `persephone uninstall`. A malformed OMP config is never overwritten. Integration applies the local three-sequence policy through OMP's own `config set` command: the interactive profile gets Advisor plus one task slot and project-scoped Mnemopi; Persephone and Librarian worker profiles disable Advisor/memory and retain one task slot. The worker profiles receive managed copies of the interactive model definitions, but not its sessions, model cache, or credential database. Librarian's Hermes configuration is not changed; the OMP MCP receives explicit environment overrides, so both backends can coexist.
 
 ## Messaging gateway
 

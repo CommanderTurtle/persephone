@@ -39,12 +39,12 @@ The most valuable changes are configuration, not more middleware:
 |Rules and context files|On|Project instructions and always-apply rules enter the prompt directly.|Keep them short; large reference material belongs in Retrieval.|
 |MCP|No servers by default|Stdio, HTTP, and SSE servers with reconnect and live tool refresh.|Use the current local MCP set; keep ownership explicit.|
 |External-device tools (`xdev`)|On|Large external schemas are fetched lazily instead of all entering the prompt.|Keep enabled.|
-|Memory|Off on this installation|Local, Hindsight, or Mnemopi backends with optional recall and retention.|Leave off to avoid a second autonomous memory owner.|
+|Memory|Mnemopi for the interactive profile|Local, Hindsight, or Mnemopi backends with optional recall and retention.|Use native project-scoped Mnemopi for OMP decisions; leave it off in gateway/Librarian workers.|
 |Compaction|Snapcompact|Several maintenance strategies, including image-based Snapcompact.|Keep Snapcompact after correcting the A1 image capability metadata.|
 |ACP|Explicit `omp acp`|Native editor protocol, permissions, sessions, extensions, and client-owned MCPs.|Use in Zed; configure MCPs on the Zed side.|
 |RPC|Explicit mode|JSONL prompts, steering, sessions, model control, host tools, and UI requests.|Persephone already uses the correct boundary.|
 |Web search|Provider chain|Exa plus many hosted and local providers.|Persephone's local Firecrawl replacement remains authoritative.|
-|Browser|Built in|OMP's Chromium-oriented browser surface.|Keep inactive while Camofox owns browsing.|
+|Browser|Persephone adapter|OMP's browser open/run/close contract backed by local Camofox.|Keep Camofox authoritative; never start Puppeteer.|
 |Collaboration|Explicit `/collab` or `omp join`|Encrypted live sharing through a public relay by default.|Leave unused; it is not required by Persephone.|
 |Stats|Explicit `omp stats`|Local SQLite session metrics and a localhost dashboard.|Useful and private; safe to use.|
 |Garbage collection|Dry-run by default|Blob cleanup, cold session archives, and SQLite WAL checkpoints.|Run manually after reviewing the dry run.|
@@ -195,9 +195,7 @@ That strength is why it should remain disabled here. Retrieval, Librarian, Codeb
 - Context Mode owns intentionally indexed bulk working material;
 - native OMP sessions own their chronological coding transcript.
 
-Turning on autonomous Mnemopi recall and retention would create a second mutable semantic memory owner and could inject overlapping material without clear provenance. `memory.backend: off` is therefore a deliberate architecture choice, not a missing setup step.
-
-If Mnemopi is evaluated later, use a dedicated profile or project, disable automatic recall and retention at first, and invoke it explicitly. Do not point it at Retrieval's Chroma collections or reuse either system's database files.
+Mnemopi now owns only OMP-specific cross-session decisions. It uses a separate project-scoped SQLite database, local embeddings, a 2,000-token injection ceiling, and no auxiliary LLM. Retrieval does not mirror this database or automatically inject the same material. Headless Persephone and Librarian profiles keep `memory.backend: off`.
 
 ## MCP, RPC, ACP, and Librarian
 
@@ -355,9 +353,14 @@ omp config set advisor.immuneTurns 3
 
 omp config set compaction.strategy snapcompact
 omp config set inspect_image.mode auto
-omp config set memory.backend off
+omp config set memory.backend mnemopi
+omp config set mnemopi.scoping per-project
+omp config set mnemopi.llmMode none
+omp config set mnemopi.injectionTokenLimit 2000
+omp config set mnemopi.recallLimit 6
+omp config set mnemopi.enhancedRecall true
 
-omp config set task.maxConcurrency 4
+omp config set task.maxConcurrency 1
 omp config set task.maxRecursionDepth 2
 omp config set task.isolation.mode auto
 omp config set task.batch true
@@ -399,7 +402,7 @@ persephone doctor
 1. Apply the zero-egress defaults, corrected multimodal model metadata, explicit Snapcompact strategy, and task concurrency limit.
 2. Enable Advisor for interactive sessions and give it a small, read-only `WATCHDOG.yml` policy.
 3. Observe one substantial Zed or TUI task before enabling Advisor on Persephone routes.
-4. Keep Mnemopi off and keep the current small visible skill set.
+4. Keep Mnemopi project-scoped and keep the current small visible skill set; Retrieval remains the separate archive.
 
 ### Existing integrations to tighten
 
@@ -418,7 +421,7 @@ persephone doctor
 
 - another memory database;
 - a second web-search owner;
-- a Chromium/Puppeteer bridge beside Camofox;
+- a Chromium/Puppeteer process beside Camofox;
 - an OMP core patch to bypass ACP MCP isolation;
 - a wrapper around native tasks, Agent Hub, swarm, autoresearch, stats, or roboomp;
 - recursive exposure of the entire `~/Hermes` skill archive;

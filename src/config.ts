@@ -10,9 +10,10 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
   listen: { host: "127.0.0.1", port: 4737, tokenEnv: "PERSEPHONE_API_TOKEN" },
   omp: {
     command: "omp",
-    profile: "default",
+    interactiveProfile: "default",
+    profile: "persephone",
     cwd: "~",
-    maxWorkers: 4,
+    maxWorkers: 1,
     idleSeconds: 1800,
   },
   signal: {
@@ -61,12 +62,12 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
       url: "http://127.0.0.1:3002",
       apiKeyEnv: "FIRECRAWL_API_KEY",
       timeoutSeconds: 60,
-      nativeFallback: false,
     },
     camofox: {
       replaceNativeBrowser: true,
       url: "http://127.0.0.1:9377",
       apiKeyEnv: "CAMOFOX_API_KEY",
+      userId: "omp-persephone",
     },
   },
   scheduler: { pollSeconds: 15 },
@@ -167,6 +168,9 @@ function validateConfig(config: PersephoneConfig): void {
   if (!config.omp || typeof config.omp.command !== "string" || !config.omp.command.trim()) {
     throw new Error("omp.command must be a non-empty string");
   }
+  if (typeof config.omp.interactiveProfile !== "string" || !config.omp.interactiveProfile.trim()) {
+    throw new Error("omp.interactiveProfile must be a non-empty string");
+  }
   if (typeof config.omp.profile !== "string" || !config.omp.profile.trim()) {
     throw new Error("omp.profile must be a non-empty string");
   }
@@ -252,14 +256,18 @@ function validateConfig(config: PersephoneConfig): void {
   }
   validateHttpUrl(config.web.firecrawl.url, "web.firecrawl.url");
   validateEnvName(config.web.firecrawl.apiKeyEnv, "web.firecrawl.apiKeyEnv");
-  if (typeof config.web.firecrawl.enabled !== "boolean" || typeof config.web.firecrawl.nativeFallback !== "boolean") {
-    throw new Error("web.firecrawl enabled/nativeFallback values must be booleans");
+  if (typeof config.web.firecrawl.enabled !== "boolean") throw new Error("web.firecrawl.enabled must be a boolean");
+  if ((config.web.firecrawl as { nativeFallback?: unknown }).nativeFallback === true) {
+    throw new Error("web.firecrawl.nativeFallback is no longer supported; hosted search fallback is forbidden");
   }
   if (!Number.isInteger(config.web.firecrawl.timeoutSeconds) || config.web.firecrawl.timeoutSeconds < 1 || config.web.firecrawl.timeoutSeconds > 300) {
     throw new Error("web.firecrawl.timeoutSeconds must be an integer from 1 to 300");
   }
   validateHttpUrl(config.web.camofox.url, "web.camofox.url");
   validateEnvName(config.web.camofox.apiKeyEnv, "web.camofox.apiKeyEnv");
+  if (typeof config.web.camofox.userId !== "string" || !config.web.camofox.userId.trim()) {
+    throw new Error("web.camofox.userId must be a non-empty string");
+  }
   if (typeof config.web.camofox.replaceNativeBrowser !== "boolean") {
     throw new Error("web.camofox.replaceNativeBrowser must be a boolean");
   }

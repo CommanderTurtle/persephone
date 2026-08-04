@@ -24,11 +24,11 @@ This matrix is the implementation answer to the original OMP migration analysis.
 |Archived skills/session semantic search|Retrieval|Native stdio MCP integration|
 |Code graph/wiki/coverage|Codebase Memory|Native compiled stdio MCP integration|
 |Delegated retrieval/synthesis|Librarian|Native OMP JSONL RPC backend + private profile|
-|Agent browser|Camofox|Native stdio MCP integration|
-|Live web search|Persephone + self-hosted Firecrawl|OMP-compatible `web_search`; local-first and fail-closed|
+|Agent browser|Persephone + Camofox|OMP-compatible `browser` adapter plus native Camofox stdio MCP|
+|Live web search|Persephone + self-hosted Firecrawl|OMP-compatible `web_search`; local-only and fail-closed|
 |SearXNG|Firecrawl internal backend|Not exposed as a competing OMP provider|
-|Puppeteer/Chromium browser|OMP|Replaced in the active set while Camofox is enabled|
-|OMP-specific autonomous memory|OMP Mnemopi|Intentionally disabled initially to avoid duplicate recall|
+|Puppeteer/Chromium browser|OMP|Same-name tool is replaced; the Puppeteer backend is never started|
+|OMP-specific autonomous memory|OMP Mnemopi|Enabled only for the interactive profile, project-scoped and locally embedded|
 |Hermes gateway|Hermes|Not required by Persephone; may coexist during migration|
 |Orca desktop UI|Orca|Excluded; Zed + OMP already cover it|
 |`pi-gateway`|Third party|Excluded: outdated runtime and prompt-only policy boundary|

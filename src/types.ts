@@ -9,6 +9,7 @@ export interface PersephoneConfig {
   };
   omp: {
     command: string;
+    interactiveProfile: string;
     profile: string;
     cwd: string;
     maxWorkers: number;
@@ -63,12 +64,12 @@ export interface PersephoneConfig {
       url: string;
       apiKeyEnv: string;
       timeoutSeconds: number;
-      nativeFallback: boolean;
     };
     camofox: {
       replaceNativeBrowser: boolean;
       url: string;
       apiKeyEnv: string;
+      userId: string;
     };
   };
   scheduler: {
