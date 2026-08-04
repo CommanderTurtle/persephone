@@ -48,4 +48,6 @@ Persephone itself makes network calls only to:
 
 The default Firecrawl and Camofox addresses are loopback. Operators may choose another trusted LAN URL, but should enable each service's authentication and populate its corresponding environment key before doing so. Firecrawl has no hosted fallback, Exa is disabled in every managed profile, and automatic OMP/marketplace update checks are off.
 
+OMP retains explicit operator-facing cloud commands as part of its native installation (for example `/share`, Smithery, and provider login), and Context Mode retains its optional Insight launcher. Persephone neither removes nor calls them. Its always-on rule forbids agents from invoking those surfaces in this local-only configuration; using one requires deliberate operator reconfiguration.
+
 Discord and Slack necessarily send their enabled channel traffic to those platforms. They are opt-in and do not create a third-party relay beyond the platform the operator selected. It does not start OMP Collab, another remote relay, analytics, or a credential broker. GitHub credentials remain inside roboomp's `gh-proxy` boundary and are never read by Persephone.
