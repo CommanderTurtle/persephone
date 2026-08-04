@@ -205,6 +205,8 @@ function configureInteractiveProfile(omp: string, profile: string, results: Inte
     ["exa.enableSearch", "false"],
     ["exa.enableResearcher", "false"],
     ["exa.enableWebsets", "false"],
+    ["startup.checkUpdate", "false"],
+    ["marketplace.autoUpdate", "off"],
     ["providers.fetch", "native"],
   ], results, `interactive-profile:${profile}`);
 }
@@ -224,6 +226,8 @@ function configureWorkerProfile(
     ["exa.enableSearch", "false"],
     ["exa.enableResearcher", "false"],
     ["exa.enableWebsets", "false"],
+    ["startup.checkUpdate", "false"],
+    ["marketplace.autoUpdate", "off"],
     ["providers.fetch", "native"],
   ], results, resultName);
 }

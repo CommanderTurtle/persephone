@@ -17,6 +17,7 @@ Persephone assumes one trusted local owner and treats every transported message,
 11. OpenTelemetry is disabled in both the daemon and RPC children.
 12. Self-hosted Firecrawl always fails closed; a local outage cannot disclose a query to a hosted provider.
 13. Firecrawl and Camofox API keys are read only from the owner-only Persephone environment file and are not written to logs.
+14. Passive OMP and marketplace update checks are disabled in every managed profile; update traffic occurs only after an explicit operator command.
 
 A Signal group or shared Discord/Slack channel is one shared route. Any permitted member of that route can respond to its pending approval prompt; use an allowlisted direct message for owner-only approval control. Slack threads are isolated from their parent channel, and Discord thread channels have their own route.
 
@@ -45,6 +46,6 @@ Persephone itself makes network calls only to:
 - the configured local roboomp health endpoint, only when its integration is enabled;
 - whatever model/MCP endpoints OMP itself is configured to use.
 
-The default Firecrawl and Camofox addresses are loopback. Operators may choose another trusted LAN URL, but should enable each service's authentication and populate its corresponding environment key before doing so. Firecrawl has no hosted fallback, and Exa is disabled in every managed profile.
+The default Firecrawl and Camofox addresses are loopback. Operators may choose another trusted LAN URL, but should enable each service's authentication and populate its corresponding environment key before doing so. Firecrawl has no hosted fallback, Exa is disabled in every managed profile, and automatic OMP/marketplace update checks are off.
 
 Discord and Slack necessarily send their enabled channel traffic to those platforms. They are opt-in and do not create a third-party relay beyond the platform the operator selected. It does not start OMP Collab, another remote relay, analytics, or a credential broker. GitHub credentials remain inside roboomp's `gh-proxy` boundary and are never read by Persephone.

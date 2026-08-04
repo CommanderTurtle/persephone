@@ -18,7 +18,7 @@ OMP already owns nearly every interactive-agent concern that looked like a possi
 The most valuable changes are configuration, not more middleware:
 
 1. disable every Exa feature in the normal local profile;
-2. disable the passive startup update request and AutoQA for an explicit zero-telemetry posture;
+2. disable passive startup and marketplace update requests, and leave AutoQA off, for an explicit zero-telemetry posture;
 3. correct the dynamically discovered A1 metadata to advertise image input and keep Snapcompact enabled;
 4. enable Advisor experimentally with the same local A1 endpoint, read-only tools, and a one-turn synchronization threshold;
 5. reduce task concurrency from 32 to a workstation-realistic value such as 4;
@@ -372,6 +372,7 @@ omp config set exa.enableResearcher false
 omp config set exa.enableWebsets false
 
 omp config set startup.checkUpdate false
+omp config set marketplace.autoUpdate off
 omp config set dev.autoqa false
 omp config set providers.fetch native
 omp config set provider.appendOnlyContext auto
