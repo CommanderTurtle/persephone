@@ -87,7 +87,10 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     const root = path.join(services, "camofox-mcp");
     const entry = path.join(root, "dist", "index.js");
     if (existsSync(entry)) {
-      publicEntries.camofox = { type: "stdio", command: bun, args: [entry], cwd: root };
+      const camofoxEnv: Record<string, string> = { CAMOFOX_URL: config.web.camofox.url };
+      const apiKey = process.env[config.web.camofox.apiKeyEnv]?.trim();
+      if (apiKey) camofoxEnv.CAMOFOX_API_KEY = apiKey;
+      publicEntries.camofox = { type: "stdio", command: bun, args: [entry], cwd: root, env: camofoxEnv };
       results.push({ name: "camofox", status: "integrated", detail: entry });
     } else results.push({ name: "camofox", status: "missing", detail: entry });
   }

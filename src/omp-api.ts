@@ -15,20 +15,43 @@ export interface ExtensionCommandContext {
   ui: ExtensionUi;
 }
 
-interface StringSchema {
+interface Schema {
+  optional(): Schema;
+  describe(description: string): Schema;
+}
+
+interface StringSchema extends Schema {
   min(length: number): StringSchema;
-  describe(description: string): StringSchema;
+}
+
+interface NumberSchema extends Schema {
+  min(value: number): NumberSchema;
+  max(value: number): NumberSchema;
+  int(): NumberSchema;
 }
 
 interface SchemaFactory {
   string(): StringSchema;
-  object(shape: Record<string, unknown>): unknown;
+  number(): NumberSchema;
+  boolean(): Schema;
+  enum(values: readonly string[]): Schema;
+  array(value: unknown): Schema;
+  object(shape: Record<string, unknown>): Schema;
 }
 
 interface ToolResult {
   content: Array<{ type: "text"; text: string }>;
   details?: unknown;
   isError?: boolean;
+}
+
+type ToolUpdate = (result: ToolResult) => void;
+
+export interface ExtensionToolContext {
+  invokeTool?<TDetails = unknown>(
+    params: Record<string, unknown>,
+    options?: { signal?: AbortSignal; onUpdate?: ToolUpdate },
+  ): Promise<ToolResult & { details?: TDetails }>;
 }
 
 interface CommandDefinition {
@@ -42,9 +65,18 @@ interface ToolDefinition {
   label: string;
   description: string;
   parameters: unknown;
-  approval?: "read" | "write";
-  loadMode?: "always" | "discoverable";
-  execute: (toolCallId: string, params: unknown, ...rest: unknown[]) => Promise<ToolResult> | ToolResult;
+  hidden?: boolean;
+  defaultInactive?: boolean;
+  approval?: "read" | "write" | "exec";
+  loadMode?: "essential" | "discoverable";
+  strict?: boolean;
+  execute: (
+    toolCallId: string,
+    params: unknown,
+    signal: AbortSignal | undefined,
+    onUpdate: ToolUpdate | undefined,
+    context: ExtensionToolContext,
+  ) => Promise<ToolResult> | ToolResult;
 }
 
 type ExtensionEvent = "session_start" | "session_shutdown";

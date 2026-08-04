@@ -23,6 +23,9 @@ This matrix is the implementation answer to the original OMP migration analysis.
 |Code graph/wiki/coverage|Codebase Memory|Native compiled stdio MCP integration|
 |Delegated retrieval/synthesis|Librarian|Native OMP JSONL RPC backend + private profile|
 |Agent browser|Camofox|Native stdio MCP integration|
+|Live web search|Persephone + self-hosted Firecrawl|OMP-compatible `web_search`; local-first and fail-closed|
+|SearXNG|Firecrawl internal backend|Not exposed as a competing OMP provider|
+|Puppeteer/Chromium browser|OMP|Replaced in the active set while Camofox is enabled|
 |OMP-specific autonomous memory|OMP Mnemopi|Intentionally disabled initially to avoid duplicate recall|
 |Hermes gateway|Hermes|Not required by Persephone; may coexist during migration|
 |Orca desktop UI|Orca|Excluded; Zed + OMP already cover it|
@@ -41,6 +44,7 @@ This matrix is the implementation answer to the original OMP migration analysis.
 - Signal gateway: **implemented against signal-cli's local HTTP/SSE API**.
 - Local model support: **left native to OMP**, with route-level provider/model selection.
 - Context Mode, Retrieval, Librarian, Codebase Memory, Camofox: **native integration implemented**.
+- Self-hosted Firecrawl search and Camofox-first browsing: **implemented through native OMP extension seams**.
 - Zed: **native ACP path preserved**.
 - Telemetry-off local operation: **forced for Persephone/child processes**.
 - Sandwich/Bun: **Bun-only runtime; no Node executable or pnpm**.

@@ -16,12 +16,14 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 - Mid-turn `/steer`, queued `/follow`, `/model`, `/thinking`, `/cwd`, and `/new` controls.
 - A local authenticated health/control API.
 - Native registration of Context Mode, Librarian, Retrieval, Codebase Memory, and Camofox.
+- Local-first web search through self-hosted Firecrawl, with no cloud fallback by default.
+- Camofox as the authoritative browser surface; OMP's Puppeteer/Chromium tool is removed from the active set.
 - A small OMP extension with `/persephone`, `persephone_status`, and `persephone_submit`.
 - Zed-first operation through OMP's own `omp acp` bridge.
 
 ## What it deliberately does not add
 
-OMP already provides editing, Hashline snapshots, LSP, plan-mode enforcement, tasks, subagents, swarm DAGs, async jobs, artifacts, compaction, browser tooling, ACP, model routing, MCP, skills, rules, and extension hooks. Persephone does not wrap or reimplement any of those.
+OMP already provides editing, Hashline snapshots, LSP, plan-mode enforcement, tasks, subagents, swarm DAGs, async jobs, artifacts, compaction, ACP, model routing, MCP, skills, rules, and extension hooks. Persephone does not wrap or reimplement any of those. Its two web substitutions use OMP's documented same-name tool registration: the built-in `web_search` schema is retained while transport goes to local Firecrawl, and the incompatible Chromium tool is made inactive in favor of Camofox's native MCP surface.
 
 It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, Mnemopi, or another memory database. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the Signal transport contract, but Hermes is not a runtime dependency.
 
@@ -75,6 +77,14 @@ Leave it disabled while Hermes owns the same Signal account. During a cutover, s
 |Retrieval|Its watcher-backed `start.sh` stdio MCP|
 |Codebase Memory|Its compiled, zero-dependency stdio server|
 |Camofox|Its built stdio MCP launched by Bun|
+
+### Local web backends
+
+The default configuration expects Firecrawl at `http://127.0.0.1:3002` and Camofox at `http://127.0.0.1:9377`. `persephone integrate` writes the configured Camofox URL into the OMP MCP entry, so the MCP never relies on a hard-coded home-directory layout. Both services may be keyless on a trusted local host; set `FIRECRAWL_API_KEY` or `CAMOFOX_API_KEY` in `~/.config/persephone/.env` when their local authentication is enabled.
+
+OMP's built-in Firecrawl provider targets `api.firecrawl.dev` and cannot select a self-hosted base URL. Persephone therefore re-registers the same `web_search` tool through OMP's supported extension API and sends the compatible `/v2/search` request to the configured local endpoint. The default is fail-closed: if local Firecrawl is down, search reports that failure rather than silently sending the query to a hosted provider. Set `web.firecrawl.nativeFallback` to `true` only when that cloud/provider fallback is intentional.
+
+Camofox is HTTP/MCP rather than CDP, so it cannot honestly emulate OMP's arbitrary `browser run` JavaScript contract. Persephone leaves all Camofox MCP tools intact and registers OMP's same-name `browser` tool as hidden and inactive. This prevents Puppeteer from spawning while preserving an explicit diagnostic if an operator manually requests the old tool. A cold Camofox health response with `browserRunning: false` is normal; the browser starts on first use.
 
 Existing OMP MCP entries and config keys are preserved. Their pre-Persephone values are recorded once and restored by `persephone uninstall`. A malformed OMP config is never overwritten. The private Librarian profile receives a managed copy of the active profile's OMP settings/model definitions, but not its sessions, MCP registry, model cache, or credential database. Librarian's Hermes configuration is not changed; the OMP MCP receives explicit environment overrides, so both backends can coexist.
 

@@ -15,6 +15,8 @@ Persephone assumes one trusted local owner and treats every transported message,
 9. OMP's native tool policies still run before execution.
 10. SQLite/config/state directories use owner-only modes where the platform permits.
 11. OpenTelemetry is disabled in both the daemon and RPC children.
+12. Self-hosted Firecrawl fails closed by default; a local outage does not silently disclose a query to a hosted provider.
+13. Firecrawl and Camofox API keys are read only from the owner-only Persephone environment file and are not written to logs.
 
 A Signal group is one shared route. Any member of an allowlisted group can respond to that route's pending approval prompt; use a direct-message allowlist for owner-only approval control.
 
@@ -36,6 +38,10 @@ Persephone itself makes network calls only to:
 
 - the configured local Signal HTTP endpoint;
 - the configured local control endpoint when its OMP extension queries status;
+- the configured Firecrawl search endpoint;
+- the configured Camofox health endpoint;
 - whatever model/MCP endpoints OMP itself is configured to use.
+
+The default Firecrawl and Camofox addresses are loopback. Operators may choose another trusted LAN URL, but should enable each service's authentication and populate its corresponding environment key before doing so. `web.firecrawl.nativeFallback` is deliberately false in the shipped configuration.
 
 It does not start OMP Collab, a remote relay, analytics, or a credential broker.

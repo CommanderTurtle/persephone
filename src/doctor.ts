@@ -64,6 +64,24 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
     if (librarian && omp) {
       results.push(probeLibrarianMcp(omp, librarian.profile));
     }
+    if (config.web.firecrawl.enabled) {
+      results.push(await probeHttpService(
+        "firecrawl",
+        config.web.firecrawl.url,
+        "/",
+        config.web.firecrawl.apiKeyEnv,
+        false,
+      ));
+    }
+    if (config.integrations.camofox) {
+      results.push(await probeHttpService(
+        "camofox",
+        config.web.camofox.url,
+        "/health",
+        config.web.camofox.apiKeyEnv,
+        true,
+      ));
+    }
     try {
       const status = await controlRequest<Record<string, unknown>>(config, "/health");
       results.push({ check: "daemon", ok: status.ok === true, detail: `http://${config.listen.host}:${config.listen.port}` });
@@ -80,6 +98,34 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
     }
   }
   return results;
+}
+
+async function probeHttpService(
+  check: string,
+  baseUrl: string,
+  pathname: string,
+  apiKeyEnv: string,
+  requireOkPayload: boolean,
+): Promise<CheckResult> {
+  const url = `${baseUrl.replace(/\/+$/, "")}${pathname}`;
+  const headers: Record<string, string> = {};
+  const apiKey = process.env[apiKeyEnv]?.trim();
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  try {
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(5000) });
+    if (!response.ok) return { check, ok: false, detail: `${url} HTTP ${response.status}` };
+    if (!requireOkPayload) return { check, ok: true, detail: `${url} HTTP ${response.status}` };
+    const payload = (await response.json()) as { ok?: unknown; engine?: unknown; browserRunning?: unknown };
+    const ok = payload.ok === true;
+    const state = payload.browserRunning === false ? " (healthy, browser cold)" : "";
+    return {
+      check,
+      ok,
+      detail: `${url} ${typeof payload.engine === "string" ? payload.engine : "HTTP 200"}${state}`,
+    };
+  } catch (error) {
+    return { check, ok: false, detail: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function librarianIntegration(config: PersephoneConfig): { profile: string } | null {

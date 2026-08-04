@@ -28,6 +28,20 @@
     "codebaseMemory": true,
     "camofox": true
   },
+  "web": {
+    "firecrawl": {
+      "enabled": true,
+      "url": "http://127.0.0.1:3002",
+      "apiKeyEnv": "FIRECRAWL_API_KEY",
+      "timeoutSeconds": 60,
+      "nativeFallback": false
+    },
+    "camofox": {
+      "replaceNativeBrowser": true,
+      "url": "http://127.0.0.1:9377",
+      "apiKeyEnv": "CAMOFOX_API_KEY"
+    }
+  },
   "scheduler": {
     "pollSeconds": 15
   },

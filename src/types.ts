@@ -33,6 +33,20 @@ export interface PersephoneConfig {
     codebaseMemory: boolean;
     camofox: boolean;
   };
+  web: {
+    firecrawl: {
+      enabled: boolean;
+      url: string;
+      apiKeyEnv: string;
+      timeoutSeconds: number;
+      nativeFallback: boolean;
+    };
+    camofox: {
+      replaceNativeBrowser: boolean;
+      url: string;
+      apiKeyEnv: string;
+    };
+  };
   scheduler: {
     pollSeconds: number;
   };

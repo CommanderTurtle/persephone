@@ -10,10 +10,12 @@ Signal HTTP/SSE       cron       local API
                         │
                OMP RPC worker pool
                         │
-        ┌───────────────┼─────────────────┐
-        │               │                 │
+       ┌───────────────┼─────────────────┐
+       │               │                 │
    native OMP       native MCPs       native ACP
   tools/tasks/swarm  and plugins          Zed
+        │               │
+ local Firecrawl      Camofox MCP
 ```
 
 ## Ownership
@@ -45,6 +47,12 @@ Signal HTTP/SSE       cron       local API
 - Context Mode: bulk corpus/output containment;
 - Codebase Memory: code graph, coverage and architecture queries;
 - Camofox: agent browser transport.
+
+## Web ownership
+
+Persephone uses OMP's documented same-name extension registration rather than patching the harness. Its `web_search` definition preserves OMP's request schema but sends `/v2/search` to the configured self-hosted Firecrawl URL. The native OMP provider remains available only as an explicitly enabled fallback. In the intended workstation layout, Firecrawl owns search orchestration and its SearXNG container is merely the local search backend.
+
+Camofox is not a Chrome DevTools Protocol endpoint, so Persephone does not pretend it can execute OMP's arbitrary `browser run` JavaScript. Camofox's own MCP owns browsing. When enabled, Persephone replaces the built-in browser registration with a hidden, inactive diagnostic definition; the `mcp__camofox_*` tools remain the real browser API.
 
 ## Worker model
 

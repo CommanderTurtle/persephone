@@ -1,6 +1,8 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "./omp-api.ts";
 import { loadConfig } from "./config.ts";
 import { controlRequest } from "./control-client.ts";
+import type { PersephoneConfig } from "./types.ts";
+import { formatFirecrawlResult, searchLocalFirecrawl, type FirecrawlSearchParams } from "./web.ts";
 
 export default function persephoneExtension(pi: ExtensionAPI): void {
   pi.setLabel("Persephone");
@@ -51,6 +53,8 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
     },
   });
 
+  registerWebTools(pi);
+
   pi.registerTool({
     name: "persephone_submit",
     label: "Persephone durable prompt",
@@ -87,6 +91,105 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
   pi.on("session_shutdown", async (_event, ctx) => {
     ctx.ui.setStatus("persephone", undefined);
   });
+}
+
+function registerWebTools(pi: ExtensionAPI): void {
+  let config: PersephoneConfig;
+  try {
+    config = loadConfig();
+  } catch {
+    // A bad Persephone config must not prevent vanilla OMP from starting. The
+    // command and status tools surface the configuration error to the operator.
+    return;
+  }
+  const { z } = pi.zod;
+  if (config.web.firecrawl.enabled) {
+    pi.registerTool({
+      name: "web_search",
+      label: "Web Search (local Firecrawl)",
+      description: "Search the web through the operator's self-hosted Firecrawl API. Firecrawl may use local SearXNG internally; no hosted search provider is contacted unless nativeFallback is explicitly enabled.",
+      parameters: z.object({
+        query: z.string().min(1).describe("Search query"),
+        recency: z.enum(["day", "week", "month", "year"]).optional(),
+        limit: z.number().min(1).max(100).optional(),
+        max_tokens: z.number().optional(),
+        temperature: z.number().optional(),
+        num_search_results: z.number().min(1).max(100).optional(),
+      }),
+      approval: "read",
+      loadMode: "discoverable",
+      strict: true,
+      async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
+        const params = rawParams as FirecrawlSearchParams;
+        try {
+          const result = await searchLocalFirecrawl(config, params, { ...(signal ? { signal } : {}) });
+          return {
+            content: [{ type: "text", text: formatFirecrawlResult(result) }],
+            details: { response: result, backend: "self-hosted" },
+          };
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          if (config.web.firecrawl.nativeFallback && ctx.invokeTool) {
+            return ctx.invokeTool(rawParams as Record<string, unknown>, {
+              ...(signal ? { signal } : {}),
+              ...(onUpdate ? { onUpdate } : {}),
+            });
+          }
+          return {
+            content: [{ type: "text", text: `Local Firecrawl search failed: ${error instanceof Error ? error.message : String(error)}` }],
+            details: { provider: "firecrawl", backend: "self-hosted", fallback: false },
+            isError: true,
+          };
+        }
+      },
+    });
+  }
+
+  if (config.integrations.camofox && config.web.camofox.replaceNativeBrowser) {
+    pi.registerTool({
+      name: "browser",
+      label: "Browser (Camofox MCP)",
+      description: "OMP's Chromium/CDP browser is deliberately inactive. Use the mcp__camofox_* tools for the Camofox browser backend.",
+      parameters: z.object({
+        action: z.enum(["open", "close", "run"]),
+        name: z.string().optional(),
+        url: z.string().optional(),
+        app: z.object({
+          path: z.string().optional(),
+          cdp_url: z.string().optional(),
+          relay: z.boolean().optional(),
+          args: z.array(z.string()).optional(),
+          target: z.string().optional(),
+        }).optional(),
+        viewport: z.object({
+          width: z.number(),
+          height: z.number(),
+          scale: z.number().optional(),
+        }).optional(),
+        wait_until: z.enum(["load", "domcontentloaded", "networkidle0", "networkidle2"]).optional(),
+        dialogs: z.enum(["accept", "dismiss"]).optional(),
+        code: z.string().optional(),
+        timeout: z.number().optional(),
+        all: z.boolean().optional(),
+        kill: z.boolean().optional(),
+      }),
+      hidden: true,
+      defaultInactive: true,
+      approval: "read",
+      loadMode: "discoverable",
+      strict: false,
+      async execute() {
+        return {
+          content: [{
+            type: "text",
+            text: "The native Chromium browser is disabled by Persephone. Use Camofox MCP: mcp__camofox_create_tab or mcp__camofox_navigate_and_snapshot, followed by mcp__camofox_click, mcp__camofox_type_text, mcp__camofox_snapshot, and related tools.",
+          }],
+          details: { backend: "camofox", nativeBrowser: false },
+          isError: true,
+        };
+      },
+    });
+  }
 }
 
 function format(value: unknown): string {

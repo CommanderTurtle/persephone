@@ -31,6 +31,20 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
     codebaseMemory: true,
     camofox: true,
   },
+  web: {
+    firecrawl: {
+      enabled: true,
+      url: "http://127.0.0.1:3002",
+      apiKeyEnv: "FIRECRAWL_API_KEY",
+      timeoutSeconds: 60,
+      nativeFallback: false,
+    },
+    camofox: {
+      replaceNativeBrowser: true,
+      url: "http://127.0.0.1:9377",
+      apiKeyEnv: "CAMOFOX_API_KEY",
+    },
+  },
   scheduler: { pollSeconds: 15 },
   security: { approvalTimeoutSeconds: 300 },
 };
@@ -74,6 +88,12 @@ export function loadConfig(): PersephoneConfig {
     omp: { ...DEFAULT_CONFIG.omp, ...parsed.omp },
     signal: { ...DEFAULT_CONFIG.signal, ...parsed.signal },
     integrations: { ...DEFAULT_CONFIG.integrations, ...parsed.integrations },
+    web: {
+      ...DEFAULT_CONFIG.web,
+      ...parsed.web,
+      firecrawl: { ...DEFAULT_CONFIG.web.firecrawl, ...parsed.web?.firecrawl },
+      camofox: { ...DEFAULT_CONFIG.web.camofox, ...parsed.web?.camofox },
+    },
     scheduler: { ...DEFAULT_CONFIG.scheduler, ...parsed.scheduler },
     security: { ...DEFAULT_CONFIG.security, ...parsed.security },
   };
@@ -99,7 +119,7 @@ export function ensureConfig(): { config: PersephoneConfig; created: boolean } {
   saveConfig(config);
   const env = envPath();
   if (!existsSync(env)) {
-    writeFileSync(env, "# Local secrets for Persephone\nSIGNAL_ACCOUNT=\nPERSEPHONE_API_TOKEN=\nOTEL_SDK_DISABLED=true\n", {
+    writeFileSync(env, "# Local secrets for Persephone\nSIGNAL_ACCOUNT=\nPERSEPHONE_API_TOKEN=\nFIRECRAWL_API_KEY=\nCAMOFOX_API_KEY=\nOTEL_SDK_DISABLED=true\n", {
       mode: 0o600,
     });
   }
@@ -161,6 +181,22 @@ function validateConfig(config: PersephoneConfig): void {
   if (!config.integrations || typeof config.integrations.servicesRoot !== "string" || !config.integrations.servicesRoot.trim()) {
     throw new Error("integrations.servicesRoot must be a non-empty path");
   }
+  if (!config.web || !config.web.firecrawl || !config.web.camofox) {
+    throw new Error("web.firecrawl and web.camofox must be configured");
+  }
+  validateHttpUrl(config.web.firecrawl.url, "web.firecrawl.url");
+  validateEnvName(config.web.firecrawl.apiKeyEnv, "web.firecrawl.apiKeyEnv");
+  if (typeof config.web.firecrawl.enabled !== "boolean" || typeof config.web.firecrawl.nativeFallback !== "boolean") {
+    throw new Error("web.firecrawl enabled/nativeFallback values must be booleans");
+  }
+  if (!Number.isInteger(config.web.firecrawl.timeoutSeconds) || config.web.firecrawl.timeoutSeconds < 1 || config.web.firecrawl.timeoutSeconds > 300) {
+    throw new Error("web.firecrawl.timeoutSeconds must be an integer from 1 to 300");
+  }
+  validateHttpUrl(config.web.camofox.url, "web.camofox.url");
+  validateEnvName(config.web.camofox.apiKeyEnv, "web.camofox.apiKeyEnv");
+  if (typeof config.web.camofox.replaceNativeBrowser !== "boolean") {
+    throw new Error("web.camofox.replaceNativeBrowser must be a boolean");
+  }
   if (!Number.isInteger(config.scheduler.pollSeconds) || config.scheduler.pollSeconds < 1 || config.scheduler.pollSeconds > 60) {
     throw new Error("scheduler.pollSeconds must be an integer from 1 to 60");
   }
@@ -170,6 +206,21 @@ function validateConfig(config: PersephoneConfig): void {
   const loopback = new Set(["127.0.0.1", "::1", "localhost"]);
   if (!loopback.has(config.listen.host) && !process.env[config.listen.tokenEnv]?.trim()) {
     throw new Error(`Non-loopback listen host requires ${config.listen.tokenEnv}`);
+  }
+}
+
+function validateHttpUrl(value: string, field: string): void {
+  try {
+    const parsed = new URL(value);
+    if (!new Set(["http:", "https:"]).has(parsed.protocol)) throw new Error();
+  } catch {
+    throw new Error(`${field} must be an HTTP(S) URL`);
+  }
+}
+
+function validateEnvName(value: string, field: string): void {
+  if (typeof value !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+    throw new Error(`${field} must name an environment variable`);
   }
 }
 
