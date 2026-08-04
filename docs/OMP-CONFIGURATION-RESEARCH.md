@@ -187,7 +187,7 @@ Do not point `skills.customDirectories` at all of `~/Hermes`. Do not duplicate e
 
 OMP's optional Mnemopi backend is a real memory system, not a placeholder. It maintains SQLite-backed working, episodic, fact, and embedding data; supports local or remote embeddings; and can automatically recall before turns and retain after turns. Hindsight and simpler local modes are also available.
 
-That strength is why it should remain disabled here. Retrieval, Librarian, Codebase Memory, and Context Mode already have distinct owners:
+That strength is why it is restricted rather than duplicated here. Retrieval, Librarian, Codebase Memory, and Context Mode retain distinct owners:
 
 - Retrieval owns archived skills and semantic/session material;
 - Librarian owns delegated search and synthesis;
@@ -195,7 +195,7 @@ That strength is why it should remain disabled here. Retrieval, Librarian, Codeb
 - Context Mode owns intentionally indexed bulk working material;
 - native OMP sessions own their chronological coding transcript.
 
-Mnemopi now owns only OMP-specific cross-session decisions. It uses a separate project-scoped SQLite database, local embeddings, a 2,000-token injection ceiling, and no auxiliary LLM. Retrieval does not mirror this database or automatically inject the same material. Headless Persephone and Librarian profiles keep `memory.backend: off`.
+Mnemopi owns only OMP-specific cross-session decisions. It uses a separate project-scoped SQLite database, local embeddings, a 2,000-token injection ceiling, and the local `smol` model role for structured extraction every four user turns. Retrieval does not mirror this database or automatically inject the same material. Headless Persephone and Librarian profiles keep `memory.backend: off`.
 
 ## MCP, RPC, ACP, and Librarian
 
@@ -293,6 +293,13 @@ This is the normal workstation profile applied on August 3, 2026.
 ```yaml
 modelRoles:
   default: vllm/compute1/Agents-A1-GPTQ-INT4-Sym
+  smol: vllm/compute1/Agents-A1-GPTQ-INT4-Sym
+  slow: vllm/compute1/Agents-A1-GPTQ-INT4-Sym
+  vision: vllm/compute1/Agents-A1-GPTQ-INT4-Sym
+  plan: vllm/compute1/Agents-A1-GPTQ-INT4-Sym
+  designer: vllm/compute1/Agents-A1-GPTQ-INT4-Sym
+  commit: vllm/compute1/Agents-A1-GPTQ-INT4-Sym
+  tiny: vllm/compute1/Agents-A1-GPTQ-INT4-Sym
   advisor: vllm/compute1/Agents-A1-GPTQ-INT4-Sym
   task: vllm/compute1/Agents-A1-GPTQ-INT4-Sym
 
@@ -304,9 +311,11 @@ advisor:
 
 compaction:
   strategy: snapcompact
+  remoteEnabled: false
+  remoteStreamingV2Enabled: false
 
 memory:
-  backend: "off"
+  backend: mnemopi
 
 task:
   maxConcurrency: 4
@@ -319,6 +328,9 @@ exa:
   enableSearch: false
   enableResearcher: false
   enableWebsets: false
+
+retry:
+  modelFallback: false
 
 startup:
   checkUpdate: false
@@ -344,7 +356,7 @@ Keep the current project/profile settings, local model catalog, and MCP registry
 OMP's config CLI treats `modelRoles` as one record, so set that value atomically. Every other recommendation is an ordinary native setting:
 
 ```bash
-omp config set modelRoles '{"default":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","advisor":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","task":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym"}'
+omp config set modelRoles '{"default":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","smol":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","slow":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","vision":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","plan":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","designer":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","commit":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","tiny":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","task":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","advisor":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym"}'
 
 omp config set advisor.enabled true
 omp config set advisor.subagents false
@@ -352,15 +364,17 @@ omp config set advisor.syncBacklog 1
 omp config set advisor.immuneTurns 3
 
 omp config set compaction.strategy snapcompact
+omp config set compaction.remoteEnabled false
+omp config set compaction.remoteStreamingV2Enabled false
 omp config set inspect_image.mode auto
 omp config set memory.backend mnemopi
 omp config set mnemopi.scoping per-project
-omp config set mnemopi.llmMode none
+omp config set mnemopi.llmMode smol
 omp config set mnemopi.injectionTokenLimit 2000
 omp config set mnemopi.recallLimit 6
 omp config set mnemopi.enhancedRecall true
 
-omp config set task.maxConcurrency 1
+omp config set task.maxConcurrency 4
 omp config set task.maxRecursionDepth 2
 omp config set task.isolation.mode auto
 omp config set task.batch true
@@ -370,6 +384,7 @@ omp config set exa.enabled false
 omp config set exa.enableSearch false
 omp config set exa.enableResearcher false
 omp config set exa.enableWebsets false
+omp config set retry.modelFallback false
 
 omp config set startup.checkUpdate false
 omp config set marketplace.autoUpdate off

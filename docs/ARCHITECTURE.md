@@ -57,7 +57,17 @@ Camofox is not a Chrome DevTools Protocol endpoint, so Persephone does not route
 
 ## Model-sequence ownership
 
-The intended local model server allows three concurrent sequences. The interactive profile uses one main sequence, one Advisor sequence, and at most one delegated task. The `persephone` and `librarian` profiles disable Advisor and autonomous memory, run at most one task, and are limited to one persistent worker. This keeps the aggregate demand explicit rather than relying on the model server to queue an accidental request storm.
+The workstation endpoint admits eight parallel sequences. Persephone configures capacity rather than eagerly starting eight agents:
+
+|Owner|Maximum active sequences|
+|---|---:|
+|Interactive OMP primary|1|
+|Interactive Advisor|1|
+|OMP task workers|4|
+|Persephone gateway worker|1|
+|Librarian delegated worker|1|
+
+Advisor is disabled inside subagents and worker profiles. Worker recursion is capped at one level. Mnemopi's periodic local extraction is transient and may queue behind the cap; it does not justify a permanently reserved ninth slot.
 
 ## Worker model
 

@@ -27,7 +27,9 @@ OMP extensions are in-process code with the user's permissions. Persephone there
 
 MCP servers remain separate child processes. Persephone writes only named entries into OMP's existing MCP JSON and refuses malformed source configuration.
 
-The Persephone and Librarian worker profiles copy operational OMP settings and model-definition files so the local default model remains usable, and their child environments opt local unauthenticated vLLM discovery in with OMP's documented non-secret sentinel. They do not copy `agent.db` credentials, sessions, or `models.db` caches. Advisor and autonomous memory are disabled in these profiles to preserve the three-sequence budget. No cloud credential is required or configured.
+The Persephone and Librarian worker profiles copy operational OMP settings and model-definition files so the local default model remains usable, and their child environments opt local unauthenticated vLLM discovery in with OMP's documented non-secret sentinel. They do not copy `agent.db` credentials, sessions, or `models.db` caches. Advisor and autonomous memory are disabled in these profiles; the eight-sequence budget reserves one worker for each while leaving four interactive task slots. No cloud credential is required or configured.
+
+Integration explicitly disables OMP remote compaction, hosted Exa features, automatic model fallback, startup update checks, marketplace auto-update, and AutoQA. All built-in model roles resolve to the configured local default unless the operator explicitly supplied another role. The default profile's Mnemopi extraction uses that local role; worker profiles have memory disabled.
 
 ## Tool authorization
 

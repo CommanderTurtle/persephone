@@ -22,6 +22,18 @@ export interface IntegrationResult {
 
 const MCP_SCHEMA = "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json";
 const MISSING = "__persephone_missing__";
+const BUILT_IN_MODEL_ROLES = [
+  "default",
+  "smol",
+  "slow",
+  "vision",
+  "plan",
+  "designer",
+  "commit",
+  "tiny",
+  "task",
+  "advisor",
+] as const;
 
 interface IntegrationBackup {
   version: 1;
@@ -45,11 +57,13 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
 
   const interactiveAgent = ompAgentDir(config.omp.interactiveProfile);
   const workerAgent = ompAgentDir(config.omp.profile);
+  const modelRoles = resolveLocalModelRoles(omp, config.omp.interactiveProfile, config);
+  configureInteractiveProfile(omp, config.omp.interactiveProfile, config, modelRoles, results);
   if (interactiveAgent !== workerAgent) {
     synchronizeProfileConfiguration(interactiveAgent, workerAgent);
   }
-  configureInteractiveProfile(omp, config.omp.interactiveProfile, results);
-  configureWorkerProfile(omp, config.omp.profile, results);
+  configureWorkerProfile(omp, config.omp.profile, config, modelRoles, results);
+  refreshManagedProfileConfig(workerAgent);
 
   const services = config.integrations.servicesRoot;
   const publicEntries: Record<string, unknown> = {};
@@ -110,7 +124,7 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
   }
 
   if (config.integrations.librarian) {
-    integrateLibrarian(config, bun, publicEntries, results);
+    integrateLibrarian(config, bun, publicEntries, modelRoles, results);
   }
 
   for (const profile of new Set([config.omp.interactiveProfile, config.omp.profile])) {
@@ -126,6 +140,7 @@ function integrateLibrarian(
   config: PersephoneConfig,
   bun: string,
   publicEntries: Record<string, unknown>,
+  modelRoles: Record<string, string> | null,
   results: IntegrationResult[],
 ): void {
   const root = path.join(config.integrations.servicesRoot, "librarian");
@@ -167,8 +182,9 @@ function integrateLibrarian(
     timeout: 660000,
   };
   const privateFile = path.join(privateAgent, "mcp.json");
-  rememberMcp(privateFile, ["librarian-okf"]);
+  rememberMcp(privateFile, [...Object.keys(publicEntries), "librarian-okf"]);
   mergeMcp(privateFile, {
+    ...publicEntries,
     "librarian-okf": {
       type: "stdio",
       command: bun,
@@ -178,58 +194,105 @@ function integrateLibrarian(
     },
   });
   synchronizeProfileConfiguration(ompAgentDir(config.omp.interactiveProfile), privateAgent);
-  configureWorkerProfile(resolveExecutable(config.omp.command) || config.omp.command, profile, results, "librarian-profile");
+  configureWorkerProfile(
+    resolveExecutable(config.omp.command) || config.omp.command,
+    profile,
+    config,
+    modelRoles,
+    results,
+    "librarian-profile",
+  );
+  refreshManagedProfileConfig(privateAgent);
   results.push({
     name: "librarian",
     status: "integrated",
-    detail: `Public MCP plus isolated '${profile}' OMP RPC profile`,
+    detail: `Public MCP plus isolated '${profile}' OMP RPC profile with Retrieval and code tools`,
   });
 }
 
-function configureInteractiveProfile(omp: string, profile: string, results: IntegrationResult[]): void {
-  configureProfile(omp, profile, [
+function configureInteractiveProfile(
+  omp: string,
+  profile: string,
+  config: PersephoneConfig,
+  modelRoles: Record<string, string> | null,
+  results: IntegrationResult[],
+): void {
+  const skills = activeSkillDirectories(config, true);
+  const values: Array<readonly [string, string]> = [
     ["advisor.enabled", "true"],
     ["advisor.subagents", "false"],
-    ["task.maxConcurrency", "1"],
+    ["advisor.syncBacklog", "1"],
+    ["advisor.immuneTurns", "3"],
+    ["task.maxConcurrency", "4"],
+    ["task.maxRecursionDepth", "2"],
+    ["task.batch", "true"],
     ["memory.backend", "mnemopi"],
     ["mnemopi.scoping", "per-project"],
     ["mnemopi.autoRecall", "true"],
     ["mnemopi.autoRetain", "true"],
-    ["mnemopi.llmMode", "none"],
+    ["mnemopi.llmMode", "smol"],
     ["mnemopi.enhancedRecall", "true"],
     ["mnemopi.polyphonicRecall", "false"],
     ["mnemopi.proactiveLinking", "false"],
     ["mnemopi.injectionTokenLimit", "2000"],
     ["mnemopi.recallLimit", "6"],
+    ["compaction.strategy", "snapcompact"],
+    ["compaction.remoteEnabled", "false"],
+    ["compaction.remoteStreamingV2Enabled", "false"],
+    ["inspect_image.mode", "auto"],
     ["exa.enabled", "false"],
     ["exa.enableSearch", "false"],
     ["exa.enableResearcher", "false"],
     ["exa.enableWebsets", "false"],
+    ["retry.modelFallback", "false"],
     ["startup.checkUpdate", "false"],
     ["marketplace.autoUpdate", "off"],
+    ["dev.autoqa", "false"],
     ["providers.fetch", "native"],
-  ], results, `interactive-profile:${profile}`);
+    ["tools.xdev", "true"],
+    ["features.unexpectedStopDetection", "true"],
+    ["skills.enableSkillCommands", "true"],
+    ["skills.customDirectories", JSON.stringify(skills)],
+  ];
+  if (modelRoles) values.unshift(["modelRoles", JSON.stringify(modelRoles)]);
+  configureProfile(omp, profile, values, results, `interactive-profile:${profile}`);
 }
 
 function configureWorkerProfile(
   omp: string,
   profile: string,
+  config: PersephoneConfig,
+  modelRoles: Record<string, string> | null,
   results: IntegrationResult[],
   resultName = `worker-profile:${profile}`,
 ): void {
-  configureProfile(omp, profile, [
+  const skills = activeSkillDirectories(config, false);
+  const values: Array<readonly [string, string]> = [
     ["advisor.enabled", "false"],
     ["advisor.subagents", "false"],
     ["task.maxConcurrency", "1"],
+    ["task.maxRecursionDepth", "1"],
+    ["task.batch", "true"],
     ["memory.backend", "off"],
+    ["compaction.strategy", "snapcompact"],
+    ["compaction.remoteEnabled", "false"],
+    ["compaction.remoteStreamingV2Enabled", "false"],
+    ["inspect_image.mode", "auto"],
     ["exa.enabled", "false"],
     ["exa.enableSearch", "false"],
     ["exa.enableResearcher", "false"],
     ["exa.enableWebsets", "false"],
+    ["retry.modelFallback", "false"],
     ["startup.checkUpdate", "false"],
     ["marketplace.autoUpdate", "off"],
+    ["dev.autoqa", "false"],
     ["providers.fetch", "native"],
-  ], results, resultName);
+    ["tools.xdev", "true"],
+    ["skills.enableSkillCommands", "true"],
+    ["skills.customDirectories", JSON.stringify(skills)],
+  ];
+  if (modelRoles) values.unshift(["modelRoles", JSON.stringify(modelRoles)]);
+  configureProfile(omp, profile, values, results, resultName);
 }
 
 function configureProfile(
@@ -252,6 +315,63 @@ function configureProfile(
     status: failures.length ? "failed" : "integrated",
     detail: failures.length ? failures.join("; ") : "Applied native OMP profile settings",
   });
+}
+
+function resolveLocalModelRoles(
+  omp: string,
+  profile: string,
+  config: PersephoneConfig,
+): Record<string, string> | null {
+  const args = profile === "default"
+    ? ["config", "get", "modelRoles"]
+    : ["--profile", profile, "config", "get", "modelRoles"];
+  const command = spawnSync(omp, args, { encoding: "utf8", env: childEnvironment() });
+  let existing: Record<string, string> = {};
+  if (command.status === 0) {
+    try {
+      const parsed = JSON.parse(command.stdout.trim()) as unknown;
+      if (isRecord(parsed)) {
+        existing = Object.fromEntries(
+          Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+        );
+      }
+    } catch {
+      // A configured provider/model below can still establish the local role map.
+    }
+  }
+  const configured = config.omp.provider && config.omp.model
+    ? `${config.omp.provider}/${config.omp.model}`
+    : undefined;
+  const fallback = configured || existing.default;
+  if (!fallback) return null;
+  return Object.fromEntries(
+    BUILT_IN_MODEL_ROLES.map((role) => [role, existing[role] || fallback]),
+  );
+}
+
+function activeSkillDirectories(config: PersephoneConfig, includeOperations: boolean): string[] {
+  const directories = [
+    path.join(config.integrations.servicesRoot, "retrieval", "skills"),
+    ...(includeOperations ? [path.join(repoRoot(), "skills")] : []),
+  ];
+  return directories.filter((directory) => existsSync(directory));
+}
+
+function refreshManagedProfileConfig(agent: string): void {
+  for (const name of ["config.yml", "config.yaml"]) {
+    const target = path.join(agent, name);
+    const marker = `${target}.managed-by-persephone`;
+    if (!existsSync(target) || !existsSync(marker)) continue;
+    try {
+      const value = JSON.parse(readFileSync(marker, "utf8")) as Record<string, unknown>;
+      writeJsonAtomic(marker, {
+        ...value,
+        sha256: sha256(readFileSync(target)),
+      });
+    } catch {
+      // A malformed marker is deliberately left untouched for the next audit.
+    }
+  }
 }
 
 export function restoreIntegrations(): string[] {

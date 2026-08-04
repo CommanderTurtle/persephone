@@ -89,7 +89,16 @@ Integration also disables OMP's passive startup and marketplace update checks in
 
 Camofox is HTTP/MCP rather than CDP. Persephone's `browser` adapter maps OMP's named-tab `open`, `run`, and `close` contract onto Camofox's local HTTP API. Browser code runs in a bounded Bun worker with `tab`, `page`, `browser`, `display`, `assert`, and `wait` helpers; normal observation, ref/selector interaction, navigation, evaluation, waits, and screenshots stay compatible. Camofox's MCP remains available for its larger extraction, download, profile, and batch surface. Raw Puppeteer-only APIs are deliberately absent, and Puppeteer never starts. A cold Camofox health response with no browser session is normal; the browser starts on first use.
 
-Existing OMP MCP entries and config keys are preserved. Their pre-Persephone values are recorded once and restored by `persephone uninstall`. A malformed OMP config is never overwritten. Integration applies the local three-sequence policy through OMP's own `config set` command: the interactive profile gets Advisor plus one task slot and project-scoped Mnemopi; Persephone and Librarian worker profiles disable Advisor/memory and retain one task slot. The worker profiles receive managed copies of the interactive model definitions, but not its sessions, model cache, or credential database. Librarian's Hermes configuration is not changed; the OMP MCP receives explicit environment overrides, so both backends can coexist.
+Existing OMP MCP entries and config keys are preserved. Their pre-Persephone values are recorded once and restored by `persephone uninstall`. A malformed OMP config is never overwritten. Integration applies the workstation's eight-sequence policy through OMP's own `config set` command:
+
+- the interactive profile has one primary turn, one Advisor, and up to four native OMP task workers;
+- Persephone reserves one persistent worker;
+- Librarian reserves one isolated delegated worker;
+- brief Mnemopi extraction overlaps are queued by vLLM rather than creating another permanent worker.
+
+Every built-in OMP model role is filled from the configured local default unless that role already has an explicit selector. Snapcompact remains native, while both remote-compaction switches, hosted search, automatic marketplace traffic, and model fallback are disabled. Interactive Mnemopi uses the local `smol` role for structured extraction every four user turns; durable gateway and Librarian profiles keep autonomous memory and Advisor disabled. Retrieval and Persephone expose one concise skill directory each instead of advertising the archived skill corpus.
+
+The worker profiles receive managed copies of the interactive model definitions, but not its sessions, model cache, or credential database. The isolated Librarian profile receives Retrieval, Codebase Memory, Context Mode, and Camofox tools without receiving the public Librarian MCP that would recurse into itself. Librarian's Hermes configuration is not changed; the OMP MCP receives explicit environment overrides, so both backends can coexist.
 
 ## Messaging gateway
 
