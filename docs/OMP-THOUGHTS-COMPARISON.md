@@ -81,7 +81,16 @@ The absence of wrappers here is intentional. Updates to these capabilities arriv
 
 ## Optional stock Orca companion
 
-Orca is not required by Persephone or OMP ACP. Operators who want its desktop worktree-orchestration surface can use the unmodified upstream checkout as a separate application. Orca does not replace the gateway, OMP, or Zed; opening an ordinary worktree in Zed remains the native `zed .` command. Keeping Orca on its stock Git origin avoids a maintenance fork and lets its normal source lifecycle deliver updates independently.
+Orca is not required by Persephone or OMP ACP. Operators who want its desktop worktree-orchestration surface should use the unmodified upstream desktop package as a separate application. On Debian and WSL, install the stable `orca-ide_<version>_amd64.deb` (or `arm64`) release asset; do not clone the application source and do not substitute its AppImage for the native package. Orca does not replace the gateway, OMP, or Zed, and opening an ordinary worktree in Zed remains the native `zed .` command.
+
+Persephone includes a small Debian lifecycle helper. It selects the current stable package for the host architecture, verifies GitHub's published SHA-256 digest and the package's `Package`, `Version`, and `Architecture` fields, compares against `dpkg-query -W orca-ide`, and delegates dependency-aware installation to `apt-get`. It deliberately detects `orca-ide`, not Debian's unrelated `orca` screen-reader package.
+
+```bash
+uv run scripts/orca-deb.py check
+uv run scripts/orca-deb.py install --private
+```
+
+The second command needs an interactive `sudo` prompt. `--private` installs a per-user desktop override using Orca's documented `DO_NOT_TRACK=1` and `ORCA_TELEMETRY_DISABLED=1` kill switches. Packaged Orca follows its own stable auto-update channel; the helper remains useful for a deterministic version check, first install, or package repair without maintaining an Orca fork.
 
 ## Revised verdict
 

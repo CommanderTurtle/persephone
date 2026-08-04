@@ -27,6 +27,8 @@ OMP already provides editing, Hashline snapshots, LSP, plan-mode enforcement, ta
 
 It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, or another memory product. OMP's native Mnemopi backend remains OMP-owned; the interactive profile can use its project-scoped local SQLite memory without involving Persephone. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the platform-adapter boundary, but Hermes is not a runtime dependency. GitHub issue automation remains OMP's native `roboomp` service rather than a second, less-isolated implementation inside Persephone.
 
+For operators who separately want Orca's desktop worktree view, `scripts/orca-deb.py` provides a version-aware installer for the official stable Debian package. It does not build Orca, clone its source, or make Orca a Persephone dependency. See [the OMP comparison](docs/OMP-THOUGHTS-COMPARISON.md#optional-stock-orca-companion).
+
 ## Install
 
 Prerequisites:
