@@ -270,6 +270,7 @@ function configureWorkerProfile(
   const values: Array<readonly [string, string]> = [
     ["advisor.enabled", "false"],
     ["advisor.subagents", "false"],
+    ["async.enabled", "false"],
     ["task.maxConcurrency", "1"],
     ["task.maxRecursionDepth", "1"],
     ["task.batch", "true"],

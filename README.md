@@ -139,6 +139,10 @@ Commands are identical on every channel:
 
 Ordinary messages enter the OMP session mapped to that channel conversation. DMs, channels, Signal groups, Discord thread channels, and Slack threads remain distinct. Approval replies are accepted only from the exact originating transport and route.
 
+`/status` includes the root session state and a compact native OMP `task`/`hub`
+child tree. The local control API also reports cached per-worker child counts and
+activity without introducing a second scheduler or child-management surface.
+
 Persephone serializes ordinary work and state-changing commands per route, while `/approve`, `/deny`, `/steer`, `/follow`, `/stop`, `/status`, and `/help` bypass that queue. This preserves arrival order without deadlocking an approval or preventing an operator from steering or stopping an active turn. Core loops are supervised with bounded restart backoff, and `/health` reports their real state rather than treating a live HTTP socket as proof that the gateway is healthy. See [Gateway audit](docs/GATEWAY-AUDIT.md) for the source-level comparison with Hermes Gateway, Pi Gateway, Orca, and native OMP.
 
 ## Durable schedules

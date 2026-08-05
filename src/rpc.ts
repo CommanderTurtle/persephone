@@ -45,6 +45,7 @@ export class OmpRpcWorker {
   private stopNotified = false;
   private leases = 0;
   private queuedTurns = 0;
+  private readonly subagents = new Map<string, JsonObject>();
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(options: OmpWorkerOptions) {
@@ -144,6 +145,20 @@ export class OmpRpcWorker {
   async getState(): Promise<JsonObject> {
     const response = await this.request("get_state");
     return asObject(response.data);
+  }
+
+  async refreshSwarmStatus(): Promise<JsonObject> {
+    const response = await this.request("get_subagents");
+    const snapshots = asObject(response.data).subagents;
+    if (Array.isArray(snapshots)) {
+      this.subagents.clear();
+      for (const value of snapshots) this.rememberSubagent(value);
+    }
+    return this.swarmStatus;
+  }
+
+  get swarmStatus(): JsonObject {
+    return swarmView([...this.subagents.values()]);
   }
 
   async close(): Promise<void> {
@@ -327,6 +342,10 @@ export class OmpRpcWorker {
       await this.completeLocalTurn();
       return;
     }
+    if (type === "subagent_lifecycle" || type === "subagent_progress") {
+      this.rememberSubagent(message.payload);
+      return;
+    }
     if (type === "extension_ui_request") {
       const response = await this.options.onUiRequest(message);
       this.write({ type: "extension_ui_response", id: firstString(message.id), ...response });
@@ -375,6 +394,17 @@ export class OmpRpcWorker {
       this.sessionPath = sessionPath;
       this.options.onSession(sessionPath);
     }
+  }
+
+  private rememberSubagent(value: unknown): void {
+    const snapshot = normalizeSubagent(value);
+    const id = firstString(snapshot.id);
+    if (!id) return;
+    const merged: JsonObject = { ...(this.subagents.get(id) ?? {}) };
+    for (const [key, item] of Object.entries(snapshot)) {
+      if (item !== null || !(key in merged)) merged[key] = item;
+    }
+    this.subagents.set(id, merged);
   }
 
   private fail(error: Error): void {
@@ -485,6 +515,17 @@ export class OmpWorkerPool {
     return this.workers.size;
   }
 
+  snapshot(): JsonObject[] {
+    return [...this.workers.values()].map((worker) => ({
+      key: worker.options.key,
+      pid: worker.pid,
+      alive: worker.isAlive,
+      occupied: worker.isOccupied,
+      sessionPath: worker.sessionPath,
+      nativeSwarm: worker.swarmStatus,
+    }));
+  }
+
   private async exclusive<T>(body: () => Promise<T>): Promise<T> {
     const previous = this.mutation;
     let release!: () => void;
@@ -516,6 +557,67 @@ function assistantText(value: unknown): string {
 
 function asObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function normalizeSubagent(value: unknown): JsonObject {
+  const snapshot = asObject(value);
+  const progress = asObject(snapshot.progress);
+  const id = firstString(progress.id, snapshot.id);
+  if (!id) return {};
+  const rawStatus = firstString(progress.status, snapshot.status) || "unknown";
+  return {
+    id,
+    index: finiteInteger(snapshot.index ?? progress.index),
+    agent: firstString(snapshot.agent, progress.agent) || "task",
+    description: firstString(progress.description, snapshot.description) || null,
+    task: firstString(snapshot.task, progress.task, snapshot.assignment, progress.assignment) || null,
+    status: rawStatus === "started" ? "running" : rawStatus,
+    sessionFile: firstString(snapshot.sessionFile) || null,
+    currentIntent: firstString(progress.lastIntent) || null,
+    currentTool: firstString(progress.currentTool) || null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function swarmView(subagents: JsonObject[]): JsonObject {
+  const ids = new Set(subagents.map((item) => firstString(item.id)).filter(Boolean));
+  const nodes = new Map<string, JsonObject>();
+  for (const item of subagents) {
+    const id = firstString(item.id);
+    if (id) nodes.set(id, { ...item, parentId: parentSubagentId(id, ids), children: [] });
+  }
+  const roots: JsonObject[] = [];
+  const counts: Record<string, number> = {};
+  for (const [id, node] of nodes) {
+    const status = firstString(node.status) || "unknown";
+    counts[status] = (counts[status] || 0) + 1;
+    const parentId = parentSubagentId(id, ids);
+    const parent = parentId ? nodes.get(parentId) : undefined;
+    if (parent) (parent.children as JsonObject[]).push(node);
+    else roots.push(node);
+  }
+  return {
+    engine: "omp-task-hub",
+    childCount: subagents.length,
+    activeCount: subagents.filter((item) => ["pending", "running"].includes(firstString(item.status))).length,
+    statusCounts: counts,
+    children: roots,
+  };
+}
+
+function parentSubagentId(id: string, ids: Set<string>): string | null {
+  const parts = id.split(".");
+  while (parts.length > 1) {
+    parts.pop();
+    const candidate = parts.join(".");
+    if (ids.has(candidate)) return candidate;
+  }
+  return null;
+}
+
+function finiteInteger(value: unknown): number {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : 0;
 }
 
 function firstString(...values: unknown[]): string {

@@ -111,6 +111,7 @@ export class PersephoneDaemon {
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
       pid: process.pid,
       workers: this.pool.size,
+      workerState: this.pool.snapshot(),
       transports: {
         signal: { enabled: this.transports.has("signal"), endpoint: this.config.signal.url },
         discord: { enabled: this.transports.has("discord") },
@@ -326,7 +327,14 @@ export class PersephoneDaemon {
       case "/status": {
         const worker = this.pool.get(`${route.channel}:${route.peerId}`);
         const state = worker ? await worker.getState() : undefined;
-        return JSON.stringify({ route, worker: state ?? "stopped", queues: this.db.status() }, null, 2);
+        const nativeSwarm = worker ? await worker.refreshSwarmStatus() : {
+          engine: "omp-task-hub",
+          childCount: 0,
+          activeCount: 0,
+          statusCounts: {},
+          children: [],
+        };
+        return JSON.stringify({ route, worker: state ?? "stopped", nativeSwarm, queues: this.db.status() }, null, 2);
       }
       case "/new": {
         await this.pool.drop(`${route.channel}:${route.peerId}`);

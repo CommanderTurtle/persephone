@@ -69,6 +69,10 @@ The workstation endpoint admits eight parallel sequences. Persephone configures 
 
 Advisor is disabled inside subagents and worker profiles. Worker recursion is capped at one level. Mnemopi's periodic local extraction is transient and may queue behind the cap; it does not justify a permanently reserved ninth slot.
 
+Inner async execution is disabled in the Persephone and Librarian worker
+profiles. A native task child may replace its waiting parent as the active
+generation, but it cannot overlap the parent and silently exceed this budget.
+
 ## Worker model
 
 One OMP RPC process owns one active conversation route. This avoids cross-thread session switching while a turn streams. Idle processes are reaped; their session file remains in the `routes` table and is restored through OMP's documented `switch_session` command on the next message.
