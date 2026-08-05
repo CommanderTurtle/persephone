@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "A sovereign, Bun-native control plane for oh-my-pi",
   "type": "module",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "author": "CommanderTurtle",
   "repository": {
     "type": "git",
