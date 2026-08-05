@@ -123,6 +123,10 @@ export class OmpRpcWorker {
     await this.request("follow_up", { message });
   }
 
+  async abort(): Promise<void> {
+    await this.request("abort");
+  }
+
   async newSession(): Promise<void> {
     await this.request("new_session");
     this.sessionPath = null;

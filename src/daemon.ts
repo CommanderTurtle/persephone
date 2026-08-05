@@ -16,6 +16,19 @@ interface PendingApproval {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface LoopState {
+  running: boolean;
+  starts: number;
+  failures: number;
+  lastStartedAt: number | null;
+  lastStoppedAt: number | null;
+  lastError: string | null;
+  restartDelayMs: number | null;
+}
+
+const PRIORITY_ROUTE_COMMANDS = new Set(["/approve", "/deny", "/follow", "/help", "/status", "/steer", "/stop"]);
+const MAX_ROUTE_DEPTH = 32;
+
 export class PersephoneDaemon {
   readonly db: PersephoneDatabase;
   readonly pool: OmpWorkerPool;
@@ -23,6 +36,9 @@ export class PersephoneDaemon {
   private readonly controller = new AbortController();
   private readonly active = new Set<Promise<void>>();
   private readonly approvals = new Map<number, PendingApproval>();
+  private readonly loops = new Map<string, LoopState>();
+  private readonly routeTails = new Map<string, Promise<void>>();
+  private readonly routeDepth = new Map<string, number>();
   private server?: Server<unknown>;
   private startedAt = Date.now();
 
@@ -76,8 +92,21 @@ export class PersephoneDaemon {
   }
 
   status(): Record<string, unknown> {
+    const loops = Object.fromEntries(
+      [...this.loops.entries()].map(([name, state]) => [name, {
+        running: state.running,
+        starts: state.starts,
+        restarts: Math.max(0, state.starts - 1),
+        failures: state.failures,
+        lastStartedAt: isoTime(state.lastStartedAt),
+        lastStoppedAt: isoTime(state.lastStoppedAt),
+        lastError: state.lastError,
+        restartDelayMs: state.restartDelayMs,
+      }]),
+    );
+    const ok = this.loops.size > 0 && [...this.loops.values()].every((state) => state.running);
     return {
-      ok: true,
+      ok,
       version: 1,
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
       pid: process.pid,
@@ -88,13 +117,54 @@ export class PersephoneDaemon {
         slack: { enabled: this.transports.has("slack") },
       },
       queues: this.db.status(),
+      routing: {
+        activeRoutes: this.routeTails.size,
+        inFlightAndQueuedMessages: [...this.routeDepth.values()].reduce((total, depth) => total + depth, 0),
+        queuedBehindActive: [...this.routeDepth.values()].reduce((total, depth) => total + Math.max(0, depth - 1), 0),
+      },
+      loops,
     };
   }
 
   private startLoop(name: string, body: () => Promise<void>): void {
-    const task = body().catch((error) => {
-      if (!this.controller.signal.aborted) console.error(`[${name}] ${formatError(error)}`);
-    });
+    if (this.loops.has(name)) throw new Error(`Duplicate Persephone loop: ${name}`);
+    const state: LoopState = {
+      running: false,
+      starts: 0,
+      failures: 0,
+      lastStartedAt: null,
+      lastStoppedAt: null,
+      lastError: null,
+      restartDelayMs: null,
+    };
+    this.loops.set(name, state);
+    const task = (async () => {
+      let failureStreak = 0;
+      while (!this.controller.signal.aborted) {
+        state.running = true;
+        state.starts++;
+        state.lastStartedAt = Date.now();
+        state.restartDelayMs = null;
+        try {
+          await body();
+          if (!this.controller.signal.aborted) throw new Error("loop exited unexpectedly");
+        } catch (error) {
+          if (this.controller.signal.aborted) break;
+          state.running = false;
+          state.lastStoppedAt = Date.now();
+          state.failures++;
+          state.lastError = formatError(error);
+          if (state.lastStartedAt && Date.now() - state.lastStartedAt >= 60_000) failureStreak = 0;
+          const delay = Math.min(30_000, 500 * 2 ** Math.min(failureStreak++, 6));
+          state.restartDelayMs = delay;
+          console.error(`[${name}] ${state.lastError}; restarting in ${delay}ms`);
+          await sleep(delay, this.controller.signal).catch(() => undefined);
+        } finally {
+          state.running = false;
+          state.lastStoppedAt = Date.now();
+        }
+      }
+    })();
     this.track(task);
   }
 
@@ -117,9 +187,43 @@ export class PersephoneDaemon {
   private async inboxLoop(): Promise<void> {
     while (!this.controller.signal.aborted) {
       const records = this.db.claimInbox(Math.max(4, this.config.omp.maxWorkers * 2));
-      for (const record of records) this.track(this.processInbox(record));
+      for (const record of records) this.dispatchInbox(record);
       await sleep(records.length ? 100 : 500, this.controller.signal);
     }
+  }
+
+  private dispatchInbox(record: InboxRecord): void {
+    if (this.isPriorityRouteCommand(record.body)) {
+      this.track(this.processInbox(record));
+      return;
+    }
+    const key = `${record.channel}:${record.peerId}`;
+    const depth = this.routeDepth.get(key) ?? 0;
+    if (depth >= MAX_ROUTE_DEPTH) {
+      const message = `Per-route queue limit reached (${MAX_ROUTE_DEPTH}); retry after the active OMP turn advances.`;
+      this.db.finishInbox(record.id, message);
+      this.reply(record, message);
+      return;
+    }
+    const predecessor = this.routeTails.get(key) ?? Promise.resolve();
+    this.routeDepth.set(key, depth + 1);
+    let task: Promise<void>;
+    task = predecessor
+      .catch(() => undefined)
+      .then(() => this.processInbox(record))
+      .finally(() => {
+        const remaining = Math.max(0, (this.routeDepth.get(key) ?? 1) - 1);
+        if (remaining) this.routeDepth.set(key, remaining);
+        else this.routeDepth.delete(key);
+        if (this.routeTails.get(key) === task) this.routeTails.delete(key);
+      });
+    this.routeTails.set(key, task);
+    this.track(task);
+  }
+
+  private isPriorityRouteCommand(body: string): boolean {
+    const command = body.trim().split(/\s+/, 1)[0]?.toLowerCase();
+    return Boolean(command && PRIORITY_ROUTE_COMMANDS.has(command));
   }
 
   private async processInbox(record: InboxRecord): Promise<void> {
@@ -215,7 +319,7 @@ export class PersephoneDaemon {
       case "/help":
         return [
           "Persephone commands:",
-          "/status · /new · /steer TEXT · /follow TEXT",
+          "/status · /stop · /new · /steer TEXT · /follow TEXT",
           "/cwd PATH · /model PROVIDER/MODEL · /thinking LEVEL",
           "/approve ID · /deny ID",
         ].join("\n");
@@ -236,6 +340,12 @@ export class PersephoneDaemon {
         if (!worker) return "No active OMP turn exists to steer.";
         await worker.steer(message);
         return "Steering message queued.";
+      }
+      case "/stop": {
+        const worker = this.pool.get(`${route.channel}:${route.peerId}`);
+        if (!worker?.isOccupied) return "No active OMP turn exists to stop.";
+        await worker.abort();
+        return "Stop requested. The saved OMP session and route are preserved.";
       }
       case "/follow": {
         const message = parts.join(" ").trim();
@@ -417,8 +527,11 @@ export class PersephoneDaemon {
 
   private async handleHttp(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/health") return json(this.status());
     if (!this.authorized(request)) return json({ error: "unauthorized" }, 401);
+    if (url.pathname === "/health") {
+      const status = this.status();
+      return json(status, status.ok ? 200 : 503);
+    }
     if (request.method === "GET" && url.pathname === "/v1/status") return json(this.status());
     if (request.method === "GET" && url.pathname === "/v1/schedules") return json(this.db.listSchedules());
     if (request.method === "GET" && url.pathname === "/v1/routes") return json(this.db.listRoutes());
@@ -458,4 +571,8 @@ function json(value: unknown, status = 200): Response {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isoTime(value: number | null): string | null {
+  return value === null ? null : new Date(value).toISOString();
 }
