@@ -1,6 +1,8 @@
 <h1 align="center">Persephone</h1>
 
-<p align="center">A small, sovereign control plane for <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>.</p>
+<p align="center">Obligatory greek goddess goth girl gateway compatibility layer for <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>.</p>
+
+![persephone-krea-gen](https://huggingface.co/sHEL1562/shelling/resolve/main/src/persephone-cropped.jpg)
 
 Persephone turns a normal OMP installation into an optional always-on local agent without forking or patching OMP. OMP remains the agent engine. Persephone owns only the operational layer that does not belong inside a coding harness: durable delivery queues, channel-to-session routing, persistent RPC workers, cron, service lifecycle, and remote approval correlation.
 
@@ -28,6 +30,8 @@ OMP already provides editing, Hashline snapshots, LSP, plan-mode enforcement, ta
 It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, or another memory product. OMP's native Mnemopi backend remains OMP-owned; the interactive profile can use its project-scoped local SQLite memory without involving Persephone. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the platform-adapter boundary, but Hermes is not a runtime dependency. GitHub issue automation remains OMP's native `roboomp` service rather than a second, less-isolated implementation inside Persephone.
 
 For operators who separately want Orca's desktop worktree view, `scripts/orca-deb.py` provides a version-aware installer for the official stable Debian package. It does not build Orca, clone its source, or make Orca a Persephone dependency. See [the OMP comparison](docs/OMP-THOUGHTS-COMPARISON.md#optional-stock-orca-companion).
+
+![compatibility.jpg](https://huggingface.co/sHEL1562/shelling/resolve/main/src/persephone-harness.jpg)
 
 ## Install
 
@@ -178,6 +182,8 @@ persephone uninstall
 `update` refuses a dirty Persephone worktree, uses `git pull --ff-only`, runs the Bun lockfile install, re-applies the idempotent integration, and restarts only an already-active service. `uninstall` removes the service and Persephone plugin link while preserving config and SQLite state.
 
 ## Privacy and trust
+
+![statue](https://huggingface.co/sHEL1562/shelling/resolve/main/src/persephone-statue.jpg)
 
 - `OTEL_SDK_DISABLED=true` is forced for the daemon and every OMP RPC child.
 - No collaboration relay is started.
