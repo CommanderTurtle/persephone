@@ -1,5 +1,51 @@
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+export interface GitHubEnsemblePersona {
+  id: string;
+  name: string;
+  botLogin: string;
+  promptFile: string;
+  commentProxyUrl: string;
+  commentProxyKeyEnv: string;
+}
+
+export interface RoboOmpGitHubConfig {
+  enabled: boolean;
+  orchestratorUrl: string;
+  upstreamProxyUrl: string;
+  workspaceRoot: string;
+  allowedRepositories: string[];
+  allowedActors: string[];
+  persephoneBotLogin: string;
+  webhookSecretEnv: string;
+  approvalTokenEnv: string;
+  replayTokenEnv: string;
+  proposalMaxDiffBytes: number;
+  dream: {
+    enabled: boolean;
+    intervalMinutes: number;
+    repositories: string[];
+    directiveAuthor: string;
+    profile: string;
+    cwdRoot: string;
+    provider?: string;
+    model?: string;
+    thinking?: ThinkingLevel;
+    promptFile: string;
+    issueProxyUrl: string;
+    issueProxyKeyEnv: string;
+  };
+  ensemble: {
+    enabled: boolean;
+    profile: string;
+    cwd: string;
+    provider?: string;
+    model?: string;
+    thinking?: ThinkingLevel;
+    personas: GitHubEnsemblePersona[];
+  };
+}
+
 export interface PersephoneConfig {
   version: 1;
   listen: {
@@ -49,6 +95,7 @@ export interface PersephoneConfig {
   roboomp: {
     enabled: boolean;
     url: string;
+    github: RoboOmpGitHubConfig;
   };
   integrations: {
     servicesRoot: string;
@@ -131,6 +178,8 @@ export interface OmpWorkerOptions {
   provider?: string | null;
   model?: string | null;
   thinking?: ThinkingLevel | null;
+  extraArgs?: string[];
+  scrubEnv?: string[];
   onSession: (path: string) => void;
   onUiRequest: (request: JsonObject) => Promise<JsonObject>;
   onExit?: () => void;

@@ -1,0 +1,110 @@
+services:
+  robomp:
+    environment:
+      # Keep native RoboOMP unchanged; only interpose Persephone before its
+      # existing HMAC-protected gh-proxy capability boundary.
+      ROBOMP_GH_PROXY_URL: http://persephone-github:8082
+    depends_on:
+      persephone-github:
+        condition: service_started
+
+  persephone-github:
+    image: robomp:dev
+    container_name: persephone-github
+    restart: unless-stopped
+    command: ["bun", "/persephone/src/github-bridge.ts"]
+    environment:
+      PERSEPHONE_CONFIG: /config/persephone.json
+      PERSEPHONE_GITHUB_STATE: /data/persephone-github.sqlite
+      PERSEPHONE_GITHUB_HOST: 0.0.0.0
+      PERSEPHONE_GITHUB_PORT: 8082
+      PERSEPHONE_GITHUB_APPROVAL_TOKEN: ${PERSEPHONE_GITHUB_APPROVAL_TOKEN:-}
+      PERSEPHONE_GITHUB_ISSUE_HMAC_KEY: ${PERSEPHONE_GITHUB_ISSUE_HMAC_KEY:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      ROBOMP_REPLAY_TOKEN: ${ROBOMP_REPLAY_TOKEN:-}
+      ROBOMP_GH_PROXY_HMAC_KEY: ${ROBOMP_GH_PROXY_HMAC_KEY:-}
+      PERSEPHONE_ENSEMBLE_OMP_COMMAND: omp
+      PERSEPHONE_ENSEMBLE_1_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_1_HMAC_KEY:-}
+      PERSEPHONE_ENSEMBLE_2_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_2_HMAC_KEY:-}
+      PERSEPHONE_ENSEMBLE_3_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_3_HMAC_KEY:-}
+      OTEL_SDK_DISABLED: "true"
+    depends_on:
+      gh-proxy:
+        condition: service_started
+    networks:
+      - default
+      - robomp_internal
+    volumes:
+      - ${PERSEPHONE_ROOT:?PERSEPHONE_ROOT must point to the Persephone checkout}:/persephone:ro
+      - ${PERSEPHONE_CONFIG_FILE:?PERSEPHONE_CONFIG_FILE must point to config.json}:/config/persephone.json:ro
+      - robomp_data:/data
+      - ${HOME}/.omp/agent/models.container.yml:/srv/agent-home-stage/.omp/agent/models.yml:ro
+      - ${HOME}/.agent/AGENT.md:/srv/agent-home-stage/.agent/AGENTS.md:ro
+      - ${HOME}/.agent/rules:/srv/agent-home-stage/.agent/rules:ro
+    ports:
+      - "127.0.0.1:${PERSEPHONE_GITHUB_PORT:-6544}:8082"
+
+  # The proactive loop cannot reach the general GitHub proxy. Only this
+  # compartment holds the main bot token, and it exposes issue creation only.
+  persephone-issue-author:
+    profiles: ["dream"]
+    image: robomp:dev
+    container_name: persephone-issue-author
+    restart: unless-stopped
+    command: ["bun", "/persephone/src/github-issue-proxy.ts"]
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      PERSEPHONE_ISSUE_PROXY_HMAC_KEY: ${PERSEPHONE_GITHUB_ISSUE_HMAC_KEY:-}
+      PERSEPHONE_GITHUB_LOGIN: ${ROBOMP_BOT_LOGIN:-}
+      PERSEPHONE_REPO_ALLOWLIST: ${ROBOMP_REPO_ALLOWLIST:-}
+    networks: [default, robomp_internal]
+    volumes:
+      - ${PERSEPHONE_ROOT:?PERSEPHONE_ROOT must point to the Persephone checkout}:/persephone:ro
+
+  # These services are deliberately tiny credential compartments. The only
+  # externally callable operation implemented by their process is POST
+  # /v1/comment. Distinct tokens produce distinct GitHub accounts/avatars.
+  persephone-ensemble-1:
+    profiles: ["ensemble"]
+    image: robomp:dev
+    container_name: persephone-ensemble-1
+    restart: unless-stopped
+    command: ["bun", "/persephone/src/github-comment-proxy.ts"]
+    environment:
+      GITHUB_TOKEN: ${PERSEPHONE_ENSEMBLE_1_GITHUB_TOKEN:-}
+      PERSEPHONE_COMMENT_PROXY_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_1_HMAC_KEY:-}
+      PERSEPHONE_GITHUB_LOGIN: ${PERSEPHONE_ENSEMBLE_1_LOGIN:-}
+      PERSEPHONE_REPO_ALLOWLIST: ${ROBOMP_REPO_ALLOWLIST:-}
+    networks: [default, robomp_internal]
+    volumes:
+      - ${PERSEPHONE_ROOT:?PERSEPHONE_ROOT must point to the Persephone checkout}:/persephone:ro
+
+  persephone-ensemble-2:
+    profiles: ["ensemble"]
+    image: robomp:dev
+    container_name: persephone-ensemble-2
+    restart: unless-stopped
+    command: ["bun", "/persephone/src/github-comment-proxy.ts"]
+    environment:
+      GITHUB_TOKEN: ${PERSEPHONE_ENSEMBLE_2_GITHUB_TOKEN:-}
+      PERSEPHONE_COMMENT_PROXY_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_2_HMAC_KEY:-}
+      PERSEPHONE_GITHUB_LOGIN: ${PERSEPHONE_ENSEMBLE_2_LOGIN:-}
+      PERSEPHONE_REPO_ALLOWLIST: ${ROBOMP_REPO_ALLOWLIST:-}
+    networks: [default, robomp_internal]
+    volumes:
+      - ${PERSEPHONE_ROOT:?PERSEPHONE_ROOT must point to the Persephone checkout}:/persephone:ro
+
+  persephone-ensemble-3:
+    profiles: ["ensemble"]
+    image: robomp:dev
+    container_name: persephone-ensemble-3
+    restart: unless-stopped
+    command: ["bun", "/persephone/src/github-comment-proxy.ts"]
+    environment:
+      GITHUB_TOKEN: ${PERSEPHONE_ENSEMBLE_3_GITHUB_TOKEN:-}
+      PERSEPHONE_COMMENT_PROXY_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_3_HMAC_KEY:-}
+      PERSEPHONE_GITHUB_LOGIN: ${PERSEPHONE_ENSEMBLE_3_LOGIN:-}
+      PERSEPHONE_REPO_ALLOWLIST: ${ROBOMP_REPO_ALLOWLIST:-}
+    networks: [default, robomp_internal]
+    volumes:
+      - ${PERSEPHONE_ROOT:?PERSEPHONE_ROOT must point to the Persephone checkout}:/persephone:ro

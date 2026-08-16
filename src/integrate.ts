@@ -65,6 +65,16 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
   configureWorkerProfile(omp, config.omp.profile, config, modelRoles, results);
   refreshManagedProfileConfig(workerAgent);
 
+  const githubProfiles = new Set<string>();
+  if (config.roboomp.github.dream.enabled) githubProfiles.add(config.roboomp.github.dream.profile);
+  if (config.roboomp.github.ensemble.enabled) githubProfiles.add(config.roboomp.github.ensemble.profile);
+  for (const profile of githubProfiles) {
+    const agent = ompAgentDir(profile);
+    if (agent !== interactiveAgent) synchronizeProfileConfiguration(interactiveAgent, agent);
+    configureWorkerProfile(omp, profile, config, modelRoles, results, `github-worker-profile:${profile}`);
+    refreshManagedProfileConfig(agent);
+  }
+
   const services = config.integrations.servicesRoot;
   const publicEntries: Record<string, unknown> = {};
   if (config.integrations.contextMode) {

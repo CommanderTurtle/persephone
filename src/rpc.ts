@@ -56,13 +56,15 @@ export class OmpRpcWorker {
       this.readyReject = reject;
     });
 
-    const args: string[] = [];
+    const args: string[] = [...(options.extraArgs ?? [])];
     if (options.profile.trim() && options.profile !== "default") args.push("--profile", options.profile);
     args.push("--mode", "rpc");
+    const childEnv = { ...process.env };
+    for (const name of options.scrubEnv ?? []) delete childEnv[name];
     this.child = spawn(options.command, args, {
       cwd: options.cwd,
       env: {
-        ...process.env,
+        ...childEnv,
         OTEL_SDK_DISABLED: "true",
         PI_RPC_EMIT_TITLE: "0",
       },
@@ -193,7 +195,12 @@ export class OmpRpcWorker {
     return (
       this.options.command === options.command &&
       this.options.profile === options.profile &&
-      this.options.cwd === options.cwd
+      this.options.cwd === options.cwd &&
+      (this.options.provider ?? null) === (options.provider ?? null) &&
+      (this.options.model ?? null) === (options.model ?? null) &&
+      (this.options.thinking ?? null) === (options.thinking ?? null) &&
+      JSON.stringify(this.options.extraArgs ?? []) === JSON.stringify(options.extraArgs ?? []) &&
+      JSON.stringify(this.options.scrubEnv ?? []) === JSON.stringify(options.scrubEnv ?? [])
     );
   }
 
