@@ -54,6 +54,7 @@ const server = Bun.serve({
         body: JSON.stringify({ title, body: `${body}\n\n${marker}` }),
       });
       return Response.json({
+        id: Number(issue.id),
         number: Number(issue.number),
         url: String(issue.html_url || ""),
         login,
@@ -75,7 +76,7 @@ async function verifyIdentity(): Promise<string> {
   return actual;
 }
 
-async function findMarker(repo: string, marker: string, login: string): Promise<{ number: number; url: string } | null> {
+async function findMarker(repo: string, marker: string, login: string): Promise<{ id: number; number: number; url: string } | null> {
   for (let page = 1; page <= 10; page++) {
     const issues = await github(`/repos/${repo}/issues?state=all&per_page=100&page=${page}`);
     if (!Array.isArray(issues)) break;
@@ -84,7 +85,7 @@ async function findMarker(repo: string, marker: string, login: string): Promise<
       if (record.pull_request) continue;
       const author = record.user && typeof record.user === "object" ? record.user as Record<string, unknown> : {};
       if (normalizeLogin(String(author.login || "")) === login && String(record.body || "").includes(marker)) {
-        return { number: Number(record.number), url: String(record.html_url || "") };
+        return { id: Number(record.id), number: Number(record.number), url: String(record.html_url || "") };
       }
     }
     if (issues.length < 100) break;

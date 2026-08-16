@@ -1,129 +1,142 @@
 # Persephone with native RoboOMP
 
-Persephone does not replace OMP's GitHub worker. It composes a policy and
-approval layer with OMP's native `python/robomp` service:
+Persephone does not replace OMP's GitHub worker. It composes a policy,
+deliberation, and publication layer with the native `python/robomp` service:
 
-- RoboOMP still owns signed webhook intake, durable events, per-issue Linux
-  users, isolated worktrees, persistent JSONL sessions, host tools, retries,
-  and GitHub mutations.
-- RoboOMP's existing `gh-proxy` still holds the main GitHub token.
-- Persephone verifies a stricter repository-and-actor allowlist before an
-  event reaches RoboOMP.
-- Persephone interposes only at the existing HMAC proxy boundary to require
-  exact-diff approval before `git push` and pull-request creation.
-- A read-only dream worker may draft grounded improvement issues. It cannot
-  create an issue until a human approves the draft.
-- Three optional ensemble workers have no tools or credentials. Each may add
-  one distinct, useful comment through its own comment-only identity sidecar.
+- RoboOMP owns signed webhook intake, durable SQLite events, per-issue Linux
+  users, isolated worktrees, persistent OMP sessions, retries, and GitHub
+  mutations.
+- RoboOMP's `gh-proxy` remains the only holder of the main GitHub token.
+- Persephone applies a stricter repository-and-actor firewall before normal
+  webhooks reach RoboOMP.
+- Persephone interposes at RoboOMP's existing HMAC proxy boundary to bind
+  publication authority to an exact repository, workspace, branch, base,
+  head, and diff.
+- A separate read-only worker may propose one grounded improvement issue.
+- Three tool-less workers deliberate through separate, comment-only GitHub
+  App identities before implementation may be dispatched.
 
-The upstream behavior and isolation model remain documented in the native
-[RoboOMP README](https://github.com/can1357/oh-my-pi/blob/main/python/robomp/README.md)
-and [RoboOMP agent guide](https://github.com/can1357/oh-my-pi/blob/main/python/robomp/AGENTS.md).
+The upstream [RoboOMP README](https://github.com/can1357/oh-my-pi/blob/main/python/robomp/README.md)
+and [agent guide](https://github.com/can1357/oh-my-pi/blob/main/python/robomp/AGENTS.md)
+remain authoritative for RoboOMP itself.
 
-## Authority flow
+## Lifecycle
 
 ```text
-signed GitHub webhook
+read-only checkout analysis
         │
         ▼
-Persephone repo + actor firewall
+grounded issue proposal
+        │  manual approval by default
+        ▼
+real GitHub issue by Persephone
+        │
+        ├── Opsec bro: one security/boundary take
+        ├── longtimeuser4: one compatibility/workflow take
+        └── Ancient Guru: one durability/simplicity take
         │
         ▼
-native RoboOMP queue/session/worktree
+ready for implementation
+        │  manual dispatch by default
+        ▼
+native RoboOMP triage + persistent issue workspace
         │
-        ├── comments/labels/reviews through native gh-proxy
+        ▼
+exact implementation diff
+        │  manual approval by default
+        ▼
+push + pull request by native RoboOMP
         │
-        └── push/PR request
-                 │
-                 ▼
-          exact base/head diff
-          human approve/reject
-                 │
-                 ▼
-          same native request resumes
+        ▼
+human review and merge
 ```
 
-An approval is not a merge. It authorizes only the recorded base commit, head
-commit, repository, branch, and RoboOMP workspace. If the worktree changes,
-Persephone marks the proposal conflicted and requires a new review.
+`dream.automatic` defaults to `false`. In that mode, the dashboard separates
+three deliberate actions: publish the proposed issue, dispatch native RoboOMP
+after all three sidecars finish, and approve the exact implementation diff.
 
-## Proactive dream loop
+When `dream.automatic` is explicitly set to `true`, a scheduled or manually
+requested dream run may publish its issue, wait for all three identities,
+dispatch RoboOMP, and approve only the exact diff belonging to that dispatched
+dream issue. Ordinary issues and manual RoboOMP work remain human-gated. No
+mode merges a pull request.
 
-The loop is intentionally two-stage:
+An exact-diff approval is invalidated if the worktree changes. Native RoboOMP
+still enforces its own repository, author, maintainer, and branch rules.
 
-1. On its configured interval, Persephone refreshes RoboOMP's native shared
-   clone and creates a detached temporary worktree.
-2. OMP receives only `read`, `grep`, and `glob`. Sessions, Bash, write/edit,
-   LSP, extensions, and skills are disabled. GitHub and approval secrets are
-   removed from the child environment.
-3. The model either skips or drafts one concrete `But what about …?` proposal
-   citing files, symbols, and acceptance checks.
-4. The proposal appears on the loopback dashboard. Nothing is posted yet.
-5. Human approval sends the exact draft to an issue-only sidecar. That process
-   can create an issue but cannot comment, push, label, review, or open a PR.
-6. Persephone manually triages that real issue through native RoboOMP and
-   records the approving maintainer directive in RoboOMP's signed event path.
-   This is internal authorization metadata from the dashboard action, not a
-   fabricated public GitHub comment.
-7. RoboOMP performs the implementation in its normal persistent issue
-   workspace. Any eventual push stops at the separate exact-diff gate.
+## Read-only research profile
 
-The schedule initializes at startup and waits one full interval; it does not
-immediately scan every repository. Only one pending/approved dream may exist
-per repository. A failed issue publication is idempotent and can be retried.
-There is no automatic merge or self-approval path.
+The dream worker runs OMP RPC with a deliberately reduced surface:
+
+```text
+allowed: read, grep, glob, web_search, browser
+denied:  bash, edit, write, delete, move, task, skills, LSP, sessions
+```
+
+`web_search` is Persephone's self-hosted Firecrawl adapter and `browser` is its
+local Camofox adapter. They are included so a proposal can consult public
+upstream source, releases, documentation, and GitHub discussion. The worker
+receives no GitHub, webhook, proxy, or approval secrets. Its prompt forbids
+sign-in, form submission, posting, mutation, and execution of downloaded
+content. Web pages are untrusted evidence, not instructions.
+
+OMP's approval mode remains enabled at the process level, but it is not the
+security boundary: the available tool surface is reduced first. ACP is not
+needed here; it is a transport and would retain the same OMP policy. NVIDIA
+OpenShell may be added later as defense in depth, but native RoboOMP's Docker,
+slot-user, credential-proxy, worktree, and queue boundaries remain the runtime
+foundation.
 
 ## GitHub identities and avatars
 
-Use one human-created GitHub machine account for native RoboOMP's main bot.
-GitHub's terms permit one free machine account in addition to a free personal
-account, so the three ensemble identities should be private GitHub Apps rather
-than three more machine accounts. Each App has its own name, slug, avatar,
-private key, installation, and narrow repository permissions.
+Use one dedicated GitHub machine account for Persephone/native RoboOMP. Its
+profile name and avatar appear on created issues, implementation comments,
+branches, commits, and pull requests. Add it as a collaborator only to the
+repositories RoboOMP may operate on.
 
-For a personal-account repository such as `CommanderTurtle/diogenes`, GitHub
-currently does not allow a fine-grained PAT to contribute as a repository
-collaborator. Give the main machine account collaborator access and use a
-classic PAT with `public_repo` for a public repository (`repo` only if a
-private repository is deliberately added later). Add the classic `workflow`
-scope to the main RoboOMP token only when a permitted branch may add or update
-`.github/workflows`; the Diogenes upstream-sync test needs it. RoboOMP's HMAC
-proxy and both repository allowlists still confine where that credential may
-be used. Create a second `public_repo` token without `workflow` on the same
-account for the approved-dream issue sidecar, so it can be revoked
-independently.
+For a public personal-account repository where that machine account is an
+outside collaborator, use a classic PAT with `public_repo`. Use `repo` instead
+only when a private repository is deliberately allowlisted. Add `workflow` to
+the main RoboOMP token only when it must change `.github/workflows`.
 
-Create each ensemble App with webhooks disabled, no account or organization
-permissions, and only these repository permissions:
+This exception is specific to GitHub's documented
+[fine-grained PAT limitation for outside and repository collaborators](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#fine-grained-personal-access-tokens-limitations).
 
-- Metadata: read-only (automatic);
-- Issues: read and write;
-- Pull requests: read and write.
+Create a second token on the same machine account for Persephone's issue-only
+sidecar. Give it `public_repo` for public repositories and do not give it
+`workflow`. Separate tokens keep issue proposal authority independently
+revocable. Neither token enters an OMP worker.
 
-Install each App with **Only select repositories** and select only the
-allowlisted repository. Download each App private key into
-`~/.config/persephone/github-apps/ensemble-1.pem` (then `-2.pem` and `-3.pem`)
-and set mode `0600`. The comment sidecar mints an installation token on demand,
-renews it before GitHub's one-hour expiry, verifies the App slug, and exposes
-only `POST /v1/comment` on the private Compose network. The private key and
-installation token never enter Persephone's OMP workers or native RoboOMP.
+Create three private GitHub Apps, one per persona, so each has its own visible
+name and avatar without creating three additional user accounts:
 
-For each main Persephone issue, PR, or issue comment, every persona is queued
-once. The model must skip agreement, praise, repetition, and roleplay-only
-chatter. An SQLite uniqueness constraint and a hidden GitHub marker make the
-one-comment-per-persona-per-source rule idempotent across restarts.
+1. Disable webhooks for the App.
+2. Set account and organization permissions to none.
+3. Set repository `Metadata` to read-only.
+4. Set repository `Issues` to read and write.
+5. Set repository `Pull requests` to read and write only if that persona may
+   comment on pull-request threads; otherwise leave it unset.
+6. Install the App with **Only select repositories**.
+7. Download one private key and store it as `ensemble-1.pem`,
+   `ensemble-2.pem`, or `ensemble-3.pem` under
+   `~/.config/persephone/github-apps/` with mode `0600`.
+8. Record the App slug/login, numeric App ID, and numeric installation ID.
 
-Customize the three prompt files under `rules/ensemble/`. Prompts shape tone;
-separate tokens and capability sidecars enforce authority.
+GitHub's issue-comment endpoint accepts either `Issues: write` or
+`Pull requests: write`, depending on the target thread; see the official
+[issue-comment permission reference](https://docs.github.com/en/rest/issues/comments#create-an-issue-comment).
 
-## Configuration
+Each sidecar mints a short-lived installation token and exposes only its
+signed `POST /v1/comment` capability on the private Compose network. Hidden
+markers and an SQLite uniqueness constraint make each persona idempotent per
+Persephone-authored source post.
 
-Start with native RoboOMP's `.env.example`; it remains authoritative for its
-main token, bot login, HMAC keys, webhook secret, repository allowlist,
-maintainers, model, and worker settings. The important values must agree:
+## Native RoboOMP environment
+
+Start with native RoboOMP's `.env.example`. For the first repository, the
+important values are:
 
 ```dotenv
-# Native python/robomp/.env
 ROBOMP_REPO_ALLOWLIST=CommanderTurtle/diogenes
 ROBOMP_MAINTAINER_LOGINS=CommanderTurtle
 ROBOMP_BOT_LOGIN=your-main-machine-account
@@ -132,35 +145,68 @@ ROBOMP_GIT_AUTHOR_EMAIL=your-main-machine-account@users.noreply.github.com
 GITHUB_WEBHOOK_SECRET=generate-a-long-random-value
 ROBOMP_REPLAY_TOKEN=generate-another-long-random-value
 ROBOMP_GH_PROXY_HMAC_KEY=generate-another-long-random-value
-GITHUB_TOKEN=classic-public_repo-plus-workflow-token-for-main-machine-account
+GITHUB_TOKEN=main-machine-account-token
 ```
 
-In `~/.config/persephone/.env`:
+Keep native RoboOMP's webhook, replay, HMAC, model, worker, and rate-limit
+settings intact. `~/.omp/agent/models.container.yml` must also exist and point
+from the container to the chosen local model provider; native RoboOMP already
+mounts that file as its model registry.
+
+## Persephone secrets
+
+Store these in `~/.config/persephone/.env`:
 
 ```dotenv
 PERSEPHONE_GITHUB_APPROVAL_TOKEN=human-dashboard-bearer-token
 PERSEPHONE_GITHUB_ISSUE_HMAC_KEY=issue-sidecar-capability-key
-PERSEPHONE_GITHUB_ISSUE_TOKEN=second-classic-public_repo-token-for-main-machine-account
+PERSEPHONE_GITHUB_ISSUE_TOKEN=second-main-account-token
 
-PERSEPHONE_ENSEMBLE_1_LOGIN=first-app-slug
+PERSEPHONE_ENSEMBLE_1_LOGIN=opsec-app-slug
 PERSEPHONE_ENSEMBLE_1_APP_ID=decimal-app-id
 PERSEPHONE_ENSEMBLE_1_INSTALLATION_ID=decimal-installation-id
 PERSEPHONE_ENSEMBLE_1_HMAC_KEY=first-capability-key
-# Repeat for identities 2 and 3.
+
+PERSEPHONE_ENSEMBLE_2_LOGIN=longtimeuser4-app-slug
+PERSEPHONE_ENSEMBLE_2_APP_ID=decimal-app-id
+PERSEPHONE_ENSEMBLE_2_INSTALLATION_ID=decimal-installation-id
+PERSEPHONE_ENSEMBLE_2_HMAC_KEY=second-capability-key
+
+PERSEPHONE_ENSEMBLE_3_LOGIN=ancient-guru-app-slug
+PERSEPHONE_ENSEMBLE_3_APP_ID=decimal-app-id
+PERSEPHONE_ENSEMBLE_3_INSTALLATION_ID=decimal-installation-id
+PERSEPHONE_ENSEMBLE_3_HMAC_KEY=third-capability-key
+
+# Optional only when the local research services require authentication.
+FIRECRAWL_API_KEY=
+CAMOFOX_API_KEY=
 ```
 
-In `~/.config/persephone/config.json`, enable `roboomp.github`, then copy the
-complete GitHub shape from `persephone.config.example.json`. In particular:
+The Compose overlay reaches the local sovereign services through
+`host.docker.internal`. Override their defaults only when necessary:
+
+```dotenv
+PERSEPHONE_FIRECRAWL_URL=http://host.docker.internal:3002
+PERSEPHONE_CAMOFOX_URL=http://host.docker.internal:9377
+```
+
+## Persephone configuration
+
+Copy the complete `roboomp.github` shape from
+`persephone.config.example.json`. The identity-specific portion should look
+like this:
 
 ```json
 {
   "roboomp": {
     "github": {
+      "enabled": true,
       "allowedRepositories": ["CommanderTurtle/diogenes"],
       "allowedActors": ["CommanderTurtle"],
       "persephoneBotLogin": "your-main-machine-account",
       "dream": {
         "enabled": true,
+        "automatic": false,
         "intervalMinutes": 1440,
         "repositories": ["CommanderTurtle/diogenes"],
         "directiveAuthor": "CommanderTurtle"
@@ -169,12 +215,28 @@ complete GitHub shape from `persephone.config.example.json`. In particular:
         "enabled": true,
         "personas": [
           {
-            "id": "persona-1",
-            "name": "Ensemble I",
-            "botLogin": "first-app-slug",
+            "id": "opsec-bro",
+            "name": "Opsec bro",
+            "botLogin": "opsec-app-slug",
             "promptFile": "rules/ensemble/persona-1.md",
             "commentProxyUrl": "http://persephone-ensemble-1:8091",
             "commentProxyKeyEnv": "PERSEPHONE_ENSEMBLE_1_HMAC_KEY"
+          },
+          {
+            "id": "longtimeuser4",
+            "name": "longtimeuser4",
+            "botLogin": "longtimeuser4-app-slug",
+            "promptFile": "rules/ensemble/persona-2.md",
+            "commentProxyUrl": "http://persephone-ensemble-2:8091",
+            "commentProxyKeyEnv": "PERSEPHONE_ENSEMBLE_2_HMAC_KEY"
+          },
+          {
+            "id": "ancient-guru",
+            "name": "Ancient Guru",
+            "botLogin": "ancient-guru-app-slug",
+            "promptFile": "rules/ensemble/persona-3.md",
+            "commentProxyUrl": "http://persephone-ensemble-3:8091",
+            "commentProxyKeyEnv": "PERSEPHONE_ENSEMBLE_3_HMAC_KEY"
           }
         ]
       }
@@ -183,50 +245,43 @@ complete GitHub shape from `persephone.config.example.json`. In particular:
 }
 ```
 
-The real config must contain exactly three persona records. Dream repositories
-must also be in `allowedRepositories`; `directiveAuthor` must also be in
-`allowedActors` and native `ROBOMP_MAINTAINER_LOGINS`. Startup fails closed
-when a required list or secret is absent.
+The dream repositories must also be in `allowedRepositories`.
+`directiveAuthor` must be in both `allowedActors` and native
+`ROBOMP_MAINTAINER_LOGINS`. Startup fails closed when a required identity,
+allowlist, or secret is absent.
 
-## Start and operate
+## Integrate and operate
 
-Point `ROBOMP_ROOT` at the native OMP directory containing RoboOMP's
-`docker-compose.yml` and `.env`:
+The native checkout on this workstation is auto-detected at
+`~/repos/oh-my-pi/python/robomp`; otherwise set `ROBOMP_ROOT` explicitly.
 
 ```bash
 cd ~/Hermes/persephone
 persephone integrate
-export ROBOMP_ROOT=/path/to/oh-my-pi/python/robomp
 ./scripts/robomp-github.sh config
 ./scripts/robomp-github.sh up
 ./scripts/robomp-github.sh status
 ./scripts/robomp-github.sh open
 ```
 
-`persephone integrate` creates the configured dream and ensemble OMP profiles
-with the same local model definitions and sovereign worker defaults used by
-the main gateway profile. Runtime flags still remove their tools/sessions.
+`persephone integrate` creates the dream and ensemble OMP profiles. Runtime
+flags still remove all unnecessary capabilities from each worker.
 
-Configure GitHub's webhook to the externally reachable
-`/webhook/github` path on Persephone's bridge, using the same
-`GITHUB_WEBHOOK_SECRET`. Keep the approval dashboard bound to loopback; its
-default local address is `http://127.0.0.1:6544/`.
+Point GitHub's webhook at the externally reachable `/webhook/github` route and
+use the same `GITHUB_WEBHOOK_SECRET`. Enable issue, issue-comment, pull-request,
+pull-request-review, and pull-request-review-comment events. The timer-driven
+dream flow itself can run without an inbound webhook, but normal follow-up
+comments and reviews require delivery.
 
-The dashboard supports:
-
-- manual native triage of `owner/repo#123`;
-- manual native review of a pull request;
-- immediate read-only dream analysis for a configured repository;
-- approve/reject of issue drafts;
-- approve/reject of exact implementation diffs.
-
-Shutdown retains SQLite state and native RoboOMP sessions/worktrees:
+The approval dashboard remains loopback-only by default at
+`http://127.0.0.1:6544/`. It exposes manual native triage/review, immediate
+dream analysis, proposal publication/rejection, ensemble retry, implementation
+dispatch, and exact-diff approval/rejection.
 
 ```bash
+./scripts/robomp-github.sh logs
 ./scripts/robomp-github.sh down
 ```
 
-`down` does not delete volumes. No command in this integration posts to GitHub
-until a real signed webhook, explicit manual triage/review, approved dream
-issue, or approved native publication request supplies the corresponding
-authority.
+`down` retains SQLite state, Docker volumes, and native RoboOMP sessions and
+worktrees. No command in this integration merges a pull request.

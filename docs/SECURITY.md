@@ -19,10 +19,10 @@ Persephone assumes one trusted local owner and treats every transported message,
 13. Firecrawl and Camofox API keys are read only from the owner-only Persephone environment file and are not written to logs.
 14. Passive OMP and marketplace update checks are disabled in every managed profile; update traffic occurs only after an explicit operator command.
 15. RoboOMP GitHub intake is repository-and-actor allowlisted before native event routing.
-16. Native RoboOMP push and PR operations require approval of the exact recorded base/head pair; worktree drift invalidates approval.
-17. Dream analysis receives read/grep/glob only, no session, no extensions or skills, and a child environment scrubbed of GitHub/approval secrets.
-18. Approved dream issues pass through an issue-only capability process. Ensemble identities pass through independent comment-only capability processes.
-19. Dream issue approval and implementation-diff approval are distinct; no component can approve itself or merge automatically.
+16. Native RoboOMP push and PR operations are bound to the exact recorded repository, workspace, branch, base, head, and diff; worktree drift invalidates approval. Manual approval is required except for the exact issue workspace created and dispatched by an explicitly enabled automatic dream policy.
+17. Dream analysis receives only read/grep/glob and Persephone's local Firecrawl/Camofox tools, no session, Bash, writes, skills, or LSP, and a child environment scrubbed of GitHub/approval secrets. Its one explicit extension is the reviewed source that provides those local research tools.
+18. Dream issues pass through an issue-only capability process. Ensemble identities pass through independent comment-only capability processes, and implementation dispatch waits for every configured identity to finish.
+19. Manual mode keeps issue publication, RoboOMP dispatch, and exact-diff approval distinct. Automatic mode advances only its own dream issue. No component merges a pull request.
 
 A Signal group or shared Discord/Slack channel is one shared route. Any permitted member of that route can respond to its pending approval prompt; use an allowlisted direct message for owner-only approval control. Slack threads are isolated from their parent channel, and Discord thread channels have their own route.
 

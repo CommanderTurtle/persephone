@@ -4,6 +4,7 @@ import { DEFAULT_CONFIG, validateRoboOmpGitHub } from "../src/config.ts";
 describe("RoboOMP GitHub configuration", () => {
   test("dream mode is fail-closed around repos, actors, issue capability, and native triage", () => {
     const config = structuredClone(DEFAULT_CONFIG);
+    expect(config.roboomp.github.dream.automatic).toBe(false);
     config.roboomp.github.enabled = true;
     config.roboomp.github.allowedRepositories = ["owner/project"];
     config.roboomp.github.allowedActors = ["human-owner"];
@@ -26,6 +27,9 @@ describe("RoboOMP GitHub configuration", () => {
       process.env[config.roboomp.github.dream.issueProxyKeyEnv] = "test-secret";
       config.roboomp.github.dream.repositories = ["owner/not-allowed"];
       expect(() => validateRoboOmpGitHub(config)).toThrow(/not allowlisted/);
+      config.roboomp.github.dream.repositories = ["owner/project"];
+      (config.roboomp.github.dream as unknown as Record<string, unknown>).automatic = "yes";
+      expect(() => validateRoboOmpGitHub(config)).toThrow(/automatic must be a boolean/);
     } finally {
       for (const [name, value] of prior) {
         if (value === undefined) delete process.env[name];

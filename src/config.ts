@@ -61,6 +61,7 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
       proposalMaxDiffBytes: 2_000_000,
       dream: {
         enabled: false,
+        automatic: false,
         intervalMinutes: 1440,
         repositories: [],
         directiveAuthor: "",
@@ -78,24 +79,24 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
         thinking: "high",
         personas: [
           {
-            id: "persona-1",
-            name: "Ensemble I",
+            id: "opsec-bro",
+            name: "Opsec bro",
             botLogin: "",
             promptFile: "rules/ensemble/persona-1.md",
             commentProxyUrl: "http://persephone-ensemble-1:8091",
             commentProxyKeyEnv: "PERSEPHONE_ENSEMBLE_1_HMAC_KEY",
           },
           {
-            id: "persona-2",
-            name: "Ensemble II",
+            id: "longtimeuser4",
+            name: "longtimeuser4",
             botLogin: "",
             promptFile: "rules/ensemble/persona-2.md",
             commentProxyUrl: "http://persephone-ensemble-2:8091",
             commentProxyKeyEnv: "PERSEPHONE_ENSEMBLE_2_HMAC_KEY",
           },
           {
-            id: "persona-3",
-            name: "Ensemble III",
+            id: "ancient-guru",
+            name: "Ancient Guru",
             botLogin: "",
             promptFile: "rules/ensemble/persona-3.md",
             commentProxyUrl: "http://persephone-ensemble-3:8091",
@@ -209,6 +210,32 @@ export function loadConfig(): PersephoneConfig {
     persona.promptFile = resolveRepoFile(persona.promptFile);
   }
   return merged;
+}
+
+/** Load only the local research backends for a credential-scrubbed OMP worker. */
+export function loadWebToolConfig(): PersephoneConfig {
+  loadEnvironment();
+  const file = configPath();
+  const parsed = existsSync(file)
+    ? (JSON.parse(readFileSync(file, "utf8")) as Partial<PersephoneConfig>)
+    : {};
+  const config = structuredClone(DEFAULT_CONFIG);
+  config.web = {
+    ...DEFAULT_CONFIG.web,
+    ...parsed.web,
+    firecrawl: { ...DEFAULT_CONFIG.web.firecrawl, ...parsed.web?.firecrawl },
+    camofox: { ...DEFAULT_CONFIG.web.camofox, ...parsed.web?.camofox },
+  };
+  const firecrawlUrl = process.env.PERSEPHONE_FIRECRAWL_URL?.trim();
+  const camofoxUrl = process.env.PERSEPHONE_CAMOFOX_URL?.trim();
+  if (firecrawlUrl) config.web.firecrawl.url = firecrawlUrl;
+  if (camofoxUrl) config.web.camofox.url = camofoxUrl;
+  validateHttpUrl(config.web.firecrawl.url, "web.firecrawl.url");
+  validateHttpUrl(config.web.camofox.url, "web.camofox.url");
+  validateEnvName(config.web.firecrawl.apiKeyEnv, "web.firecrawl.apiKeyEnv");
+  validateEnvName(config.web.camofox.apiKeyEnv, "web.camofox.apiKeyEnv");
+  if (!config.web.camofox.userId.trim()) throw new Error("web.camofox.userId must be a non-empty string");
+  return config;
 }
 
 /** Load only the RoboOMP GitHub bridge contract.
@@ -438,6 +465,7 @@ export function validateRoboOmpGitHub(config: PersephoneConfig): void {
   }
   const dream = github.dream;
   validateBoolean(dream.enabled, "roboomp.github.dream.enabled");
+  validateBoolean(dream.automatic, "roboomp.github.dream.automatic");
   if (!Number.isInteger(dream.intervalMinutes) || dream.intervalMinutes < 15 || dream.intervalMinutes > 525_600) {
     throw new Error("roboomp.github.dream.intervalMinutes must be an integer from 15 to 525600");
   }

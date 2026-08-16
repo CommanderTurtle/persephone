@@ -58,6 +58,7 @@
       "proposalMaxDiffBytes": 2000000,
       "dream": {
         "enabled": false,
+        "automatic": false,
         "intervalMinutes": 1440,
         "repositories": [],
         "directiveAuthor": "",
@@ -75,24 +76,24 @@
         "thinking": "high",
         "personas": [
           {
-            "id": "persona-1",
-            "name": "Ensemble I",
+            "id": "opsec-bro",
+            "name": "Opsec bro",
             "botLogin": "",
             "promptFile": "rules/ensemble/persona-1.md",
             "commentProxyUrl": "http://persephone-ensemble-1:8091",
             "commentProxyKeyEnv": "PERSEPHONE_ENSEMBLE_1_HMAC_KEY"
           },
           {
-            "id": "persona-2",
-            "name": "Ensemble II",
+            "id": "longtimeuser4",
+            "name": "longtimeuser4",
             "botLogin": "",
             "promptFile": "rules/ensemble/persona-2.md",
             "commentProxyUrl": "http://persephone-ensemble-2:8091",
             "commentProxyKeyEnv": "PERSEPHONE_ENSEMBLE_2_HMAC_KEY"
           },
           {
-            "id": "persona-3",
-            "name": "Ensemble III",
+            "id": "ancient-guru",
+            "name": "Ancient Guru",
             "botLogin": "",
             "promptFile": "rules/ensemble/persona-3.md",
             "commentProxyUrl": "http://persephone-ensemble-3:8091",

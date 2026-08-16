@@ -23,6 +23,7 @@ export interface RoboOmpGitHubConfig {
   proposalMaxDiffBytes: number;
   dream: {
     enabled: boolean;
+    automatic: boolean;
     intervalMinutes: number;
     repositories: string[];
     directiveAuthor: string;

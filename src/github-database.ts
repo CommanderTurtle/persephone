@@ -39,7 +39,7 @@ export interface EnsembleJob {
   error: string | null;
 }
 
-export type DreamStatus = "pending" | "approved" | "rejected" | "issued" | "failed";
+export type DreamStatus = "pending" | "approved" | "rejected" | "issued" | "ready" | "dispatched" | "failed";
 
 export interface DreamProposal {
   id: string;
@@ -115,7 +115,7 @@ export class GitHubBridgeDatabase {
         issue_body TEXT NOT NULL,
         rationale TEXT NOT NULL,
         implementation_brief TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','issued','failed')),
+        status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','issued','ready','dispatched','failed')),
         issue_number INTEGER,
         issue_url TEXT,
         error TEXT,
@@ -130,9 +130,38 @@ export class GitHubBridgeDatabase {
         last_error TEXT
       );
     `);
+    this.migrateDreamSchema();
     this.db.run("UPDATE ensemble_jobs SET status='queued', error='Recovered after restart' WHERE status='running'");
     this.db.run("UPDATE dream_schedule SET running=0, last_error='Recovered after restart' WHERE running=1");
     this.db.run("UPDATE dream_proposals SET status='failed', error='Recovered during approved issue publication' WHERE status='approved'");
+  }
+
+  private migrateDreamSchema(): void {
+    const row = this.db.query("SELECT sql FROM sqlite_master WHERE type='table' AND name='dream_proposals'").get() as { sql?: string } | null;
+    const schema = String(row?.sql || "");
+    if (!schema || schema.includes("'dispatched'")) return;
+    this.db.transaction(() => {
+      this.db.exec(`
+        DROP INDEX IF EXISTS dream_status_idx;
+        ALTER TABLE dream_proposals RENAME TO dream_proposals_legacy;
+        CREATE TABLE dream_proposals (
+          id TEXT PRIMARY KEY, repo TEXT NOT NULL, base_sha TEXT NOT NULL,
+          title TEXT NOT NULL, issue_body TEXT NOT NULL, rationale TEXT NOT NULL,
+          implementation_brief TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','issued','ready','dispatched','failed')),
+          issue_number INTEGER, issue_url TEXT, error TEXT,
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        INSERT INTO dream_proposals(
+          id, repo, base_sha, title, issue_body, rationale, implementation_brief,
+          status, issue_number, issue_url, error, created_at, updated_at
+        ) SELECT id, repo, base_sha, title, issue_body, rationale, implementation_brief,
+          status, issue_number, issue_url, error, created_at, updated_at
+          FROM dream_proposals_legacy;
+        DROP TABLE dream_proposals_legacy;
+        CREATE INDEX dream_status_idx ON dream_proposals(status, updated_at);
+      `);
+    })();
   }
 
   close(): void {
@@ -227,6 +256,11 @@ export class GitHubBridgeDatabase {
       .run(status, outputBody ?? null, error ?? null, Date.now(), id);
   }
 
+  retryFailedEnsemble(repo: string, issueNumber: number): number {
+    return this.db.query("UPDATE ensemble_jobs SET status='queued', error=NULL, updated_at=? WHERE lower(repo)=lower(?) AND issue_number=? AND status='failed'")
+      .run(Date.now(), repo, issueNumber).changes;
+  }
+
   listEnsemble(limit = 100): EnsembleJob[] {
     return (this.db.query("SELECT * FROM ensemble_jobs ORDER BY updated_at DESC LIMIT ?").all(limit) as Record<string, unknown>[])
       .map(mapEnsemble);
@@ -252,8 +286,32 @@ export class GitHubBridgeDatabase {
     return row ? mapDream(row) : null;
   }
 
+  findDreamByIssue(repo: string, issueNumber: number): DreamProposal | null {
+    const row = this.db.query(
+      "SELECT * FROM dream_proposals WHERE lower(repo)=lower(?) AND issue_number=? ORDER BY updated_at DESC LIMIT 1",
+    ).get(repo, issueNumber) as Record<string, unknown> | null;
+    return row ? mapDream(row) : null;
+  }
+
+  ensembleProgress(repo: string, issueNumber: number, personaIds: string[]): {
+    complete: boolean;
+    failed: string[];
+  } {
+    const rows = this.db.query(
+      "SELECT persona_id, status FROM ensemble_jobs WHERE lower(repo)=lower(?) AND issue_number=? ORDER BY id",
+    ).all(repo, issueNumber) as Array<{ persona_id: string; status: EnsembleJob["status"] }>;
+    const wanted = new Set(personaIds);
+    const terminalStatuses = new Set<EnsembleJob["status"]>(["commented", "skipped", "failed"]);
+    const terminal = new Map<string, EnsembleJob["status"]>();
+    for (const row of rows) {
+      if (wanted.has(row.persona_id) && terminalStatuses.has(row.status)) terminal.set(row.persona_id, row.status);
+    }
+    const failed = personaIds.filter((id) => terminal.get(id) === "failed");
+    return { complete: personaIds.every((id) => terminal.has(id)), failed };
+  }
+
   hasPendingDream(repo: string): boolean {
-    return Boolean(this.db.query("SELECT 1 AS found FROM dream_proposals WHERE lower(repo)=lower(?) AND status IN ('pending','approved') LIMIT 1").get(repo));
+    return Boolean(this.db.query("SELECT 1 AS found FROM dream_proposals WHERE lower(repo)=lower(?) AND status IN ('pending','approved','issued','ready') LIMIT 1").get(repo));
   }
 
   listDreams(limit = 100): DreamProposal[] {

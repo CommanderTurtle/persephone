@@ -53,10 +53,11 @@ const server = Bun.serve({
 
 const ensembleTimer = setInterval(() => void processEnsembleQueue(), 500);
 const dreamTimer = setInterval(() => void processDreamSchedule(), 30_000);
+const dreamReconcileTimer = setInterval(() => void processDreamReconciliation(), 5_000);
 console.log(`[persephone-github] bridge listening on ${server.url}`);
-console.log(`[persephone-github] publication gate: exact-diff approval required`);
+console.log(`[persephone-github] publication gate: ${config.dream.automatic ? "timer dreams automatic; all other diffs require approval" : "exact-diff approval required"}`);
 console.log(`[persephone-github] ensemble: ${config.ensemble.enabled ? "enabled" : "disabled"}`);
-console.log(`[persephone-github] dream loop: ${config.dream.enabled ? `enabled (${config.dream.intervalMinutes}m)` : "disabled"}`);
+console.log(`[persephone-github] dream loop: ${config.dream.enabled ? `enabled (${config.dream.intervalMinutes}m, ${config.dream.automatic ? "automatic" : "manual dispatch"})` : "disabled"}`);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => void shutdown());
@@ -70,8 +71,9 @@ async function route(request: Request): Promise<Response> {
       capability: "robomp-publication-gate",
       ensemble: config.ensemble.enabled,
       dream: config.dream.enabled,
+      dreamAutomatic: config.dream.automatic,
       pending: db.listProposals().filter((item) => item.status === "pending").length,
-      pendingDreams: db.listDreams().filter((item) => item.status === "pending").length,
+      activeDreams: db.listDreams().filter((item) => new Set(["pending", "approved", "issued", "ready"]).has(item.status)).length,
     });
   }
   if (url.pathname === "/webhook/github" && request.method === "POST") return handleWebhook(request);
@@ -182,6 +184,9 @@ function preparePush(input: Record<string, unknown>): Response | null {
   } catch (error) {
     return githubError("git", 409, message(error));
   }
+  const issueNumber = workspaceIssueNumber(workspaceKey);
+  const dream = config.dream.automatic ? db.findDreamByIssue(repo, issueNumber) : null;
+  const automaticPublication = dream?.status === "dispatched";
   const existing = db.findProposal(workspaceKey, expectedHead);
   if (existing) {
     if (existing.status === "approved") {
@@ -189,16 +194,28 @@ function preparePush(input: Record<string, unknown>): Response | null {
       db.transitionProposal(existing.id, ["approved"], "conflicted", { error: "Workspace changed after approval" });
       return githubError("git", 409, `Persephone approval ${existing.id} conflicted because the exact diff changed`);
     }
+    if (existing.status === "pending" && automaticPublication) {
+      if (existing.baseSha !== snapshot.baseSha || existing.diffSha256 !== snapshot.diffSha256) {
+        db.transitionProposal(existing.id, ["pending"], "conflicted", { error: "Workspace changed before automatic publication" });
+        return githubError("git", 409, `Persephone publication ${existing.id} conflicted because the exact diff changed`);
+      }
+      db.transitionProposal(existing.id, ["pending"], "approved");
+      return null;
+    }
     if (existing.status === "pushed" || existing.status === "published") return null;
     return githubError("git", 409, `Persephone publication ${existing.id} is ${existing.status}; inspect http://127.0.0.1:${port}/`);
   }
-  const issueNumber = workspaceIssueNumber(workspaceKey);
   const id = sha256(`${repo}\n${workspaceKey}\n${branch}\n${expectedHead}\n${snapshot.baseSha}\n${snapshot.diffSha256}`).slice(0, 24);
   db.putProposal({
     id, repo, issueNumber, workspaceKey, branch, headSha: expectedHead,
     baseSha: snapshot.baseSha, diffSha256: snapshot.diffSha256,
     diffText: snapshot.text, diffTruncated: snapshot.truncated,
   });
+  if (automaticPublication) {
+    db.transitionProposal(id, ["pending"], "approved");
+    console.log(`[persephone-github] automatically approved exact diff ${id} for timer-dispatched dream ${dream!.id}`);
+    return null;
+  }
   return githubError("git", 409, `Persephone staged exact diff ${id}; human approval is required at http://127.0.0.1:${port}/`);
 }
 
@@ -215,16 +232,24 @@ async function handleApi(request: Request, url: URL): Promise<Response> {
     void executeDream(repo);
     return Response.json({ accepted: true, repo }, { status: 202 });
   }
-  const dreamAction = url.pathname.match(/^\/api\/dreams\/([a-f0-9]{24})\/(approve|reject)$/);
+  const dreamAction = url.pathname.match(/^\/api\/dreams\/([a-f0-9]{24})\/(approve|reject|dispatch)$/);
   if (request.method === "POST" && dreamAction) {
     const proposal = db.getDream(dreamAction[1]!);
     if (!proposal) return Response.json({ error: "dream proposal not found" }, { status: 404 });
-    if (dreamAction[2] === "reject") {
-      const changed = db.transitionDream(proposal.id, ["pending", "approved"], "rejected");
+    const action = dreamAction[2];
+    if (action === "reject") {
+      const changed = db.transitionDream(proposal.id, ["pending", "approved", "issued", "ready"], "rejected");
       return Response.json(changed ?? proposal, { status: changed ? 200 : 409 });
     }
-    if (!new Set(["pending", "failed"]).has(proposal.status)) return Response.json({ error: `dream proposal is ${proposal.status}` }, { status: 409 });
-    return approveDream(proposal);
+    if (action === "dispatch") return dispatchDream(proposal);
+    if (proposal.status === "failed" && proposal.issueNumber) {
+      const retried = db.retryFailedEnsemble(proposal.repo, proposal.issueNumber);
+      if (!retried) return Response.json({ error: "no failed ensemble jobs are available to retry" }, { status: 409 });
+      const issued = db.transitionDream(proposal.id, ["failed"], "issued", { error: null });
+      return Response.json({ proposal: issued, retried });
+    }
+    if (proposal.status !== "pending") return Response.json({ error: `dream proposal is ${proposal.status}` }, { status: 409 });
+    return publishDreamIssue(proposal);
   }
   const action = url.pathname.match(/^\/api\/proposals\/([a-f0-9]{24})\/(approve|reject)$/);
   if (request.method === "POST" && action) {
@@ -318,6 +343,12 @@ async function processDreamSchedule(): Promise<void> {
   if (repo) void executeDream(repo);
 }
 
+async function processDreamReconciliation(): Promise<void> {
+  for (const proposal of db.listDreams().filter((item) => item.status === "issued" && item.issueNumber)) {
+    await reconcileDreamIssue(proposal.repo, proposal.issueNumber!);
+  }
+}
+
 async function executeDream(repo: string): Promise<void> {
   dreamBusy = true;
   let worktree = "";
@@ -341,7 +372,7 @@ async function executeDream(repo: string): Promise<void> {
       provider: config.dream.provider ?? null,
       model: config.dream.model ?? null,
       thinking: config.dream.thinking ?? null,
-      extraArgs: ["--no-session", "--tools=read,grep,glob", "--no-lsp", "--no-extensions", "--no-skills"],
+      extraArgs: ["--no-session", "--no-extensions", "--extension=/persephone/src/extension.ts", "--tools=read,grep,glob,web_search,browser", "--no-lsp", "--no-skills", "--approval-mode=yolo"],
       scrubEnv: workerSecretNames,
       onSession: () => undefined,
       onUiRequest: async () => ({ confirmed: false, cancelled: true, reason: "Dream analysis is read-only and non-interactive" }),
@@ -358,7 +389,12 @@ async function executeDream(repo: string): Promise<void> {
           issueBody: decision.issueBody, rationale: decision.rationale,
           implementationBrief: decision.implementationBrief,
         });
-        console.log(`[persephone-github] dream proposal ${proposal.id} is ready for human review`);
+        if (config.dream.automatic) {
+          const response = await publishDreamIssue(proposal);
+          if (!response.ok) throw new Error(`automatic dream publication failed: ${response.status} ${(await response.text()).slice(0, 500)}`);
+        } else {
+          console.log(`[persephone-github] dream proposal ${proposal.id} is ready for human review`);
+        }
       }
     } finally {
       worker.release();
@@ -423,27 +459,77 @@ function dreamPrompt(repo: string, baseSha: string): string {
     "Inspect this checkout carefully. Return one grounded proposal or skip according to the contract.";
 }
 
-async function approveDream(proposal: DreamProposal): Promise<Response> {
-  const marked = db.transitionDream(proposal.id, ["pending", "failed"], "approved");
+async function publishDreamIssue(proposal: DreamProposal): Promise<Response> {
+  const marked = db.transitionDream(proposal.id, ["pending"], "approved");
   if (!marked) return Response.json({ error: `dream proposal is ${proposal.status}` }, { status: 409 });
   try {
+    const authorization = config.dream.automatic ? "timer-authorized" : "approved by a human";
     const body = `${proposal.issueBody}\n\n## Why Persephone proposed this\n\n${proposal.rationale}\n\n` +
-      `## Approved implementation brief\n\n${proposal.implementationBrief}\n\n` +
-      `_Generated from an isolated read-only analysis of commit \`${proposal.baseSha}\`. Issue creation was approved by a human; implementation and publication are separately gated._`;
+      `## Proposed implementation brief\n\n${proposal.implementationBrief}\n\n` +
+      `_Generated from an isolated read-only analysis of commit \`${proposal.baseSha}\`. Issue creation was ${authorization}. Implementation waits for the three-person ensemble; publication remains governed by the configured exact-diff gate._`;
     const issue = await createDreamIssue(proposal, body);
     const issueNumber = Number(issue.number);
-    if (!Number.isSafeInteger(issueNumber) || issueNumber < 1) throw new Error("issue-only proxy returned an invalid issue number");
-    const triage = await triggerRoboOmp({ mode: "triage", issue: `${proposal.repo}#${issueNumber}` });
-    if (!triage.ok) throw new Error(`native RoboOMP triage failed: ${triage.status} ${(await triage.text()).slice(0, 500)}`);
-    const directive = await sendDreamDirective(proposal, issueNumber, body);
-    if (!directive.ok) throw new Error(`native RoboOMP directive failed: ${directive.status} ${(await directive.text()).slice(0, 500)}`);
+    const sourceId = Number(issue.id);
+    if (!Number.isSafeInteger(issueNumber) || issueNumber < 1 || !Number.isSafeInteger(sourceId) || sourceId < 1) {
+      throw new Error("issue-only proxy returned an invalid issue identity");
+    }
     const issued = db.transitionDream(proposal.id, ["approved"], "issued", {
       issueNumber, issueUrl: String(issue.url || ""), error: null,
-    });
-    return Response.json({ proposal: issued, issue, triage: await triage.json().catch(() => ({})), directive: await directive.json().catch(() => ({})) });
+    })!;
+    if (config.ensemble.enabled) {
+      enqueueEnsemblePost(proposal.repo, {
+        id: sourceId, number: issueNumber, title: proposal.title, body, html_url: String(issue.url || ""),
+      }, {
+        id: sourceId, body, html_url: String(issue.url || ""),
+      });
+      await reconcileDreamIssue(proposal.repo, issueNumber);
+    } else {
+      const ready = db.transitionDream(proposal.id, ["issued"], "ready", { error: null })!;
+      if (config.dream.automatic) return dispatchDream(ready);
+    }
+    return Response.json({ proposal: db.getDream(proposal.id), issue });
   } catch (error) {
-    const failed = db.transitionDream(proposal.id, ["approved"], "failed", { error: message(error) });
+    const failed = db.transitionDream(proposal.id, ["approved", "issued"], "failed", { error: message(error) });
     return Response.json({ error: message(error), proposal: failed }, { status: 502 });
+  }
+}
+
+async function reconcileDreamIssue(repo: string, issueNumber: number): Promise<void> {
+  const proposal = db.findDreamByIssue(repo, issueNumber);
+  if (!proposal || proposal.status !== "issued") return;
+  const progress = db.ensembleProgress(repo, issueNumber, config.ensemble.personas.map((persona) => persona.id));
+  if (!progress.complete) return;
+  if (progress.failed.length) {
+    db.transitionDream(proposal.id, ["issued"], "failed", {
+      error: `Ensemble sidecars failed for: ${progress.failed.join(", ")}. Retry from the dashboard after correcting the identity or service.`,
+    });
+    return;
+  }
+  const ready = db.transitionDream(proposal.id, ["issued"], "ready", { error: null });
+  if (ready && config.dream.automatic) {
+    const response = await dispatchDream(ready);
+    if (!response.ok) console.error(`[persephone-github] automatic dispatch failed for ${ready.id}: ${response.status}`);
+  }
+}
+
+async function dispatchDream(proposal: DreamProposal): Promise<Response> {
+  if (proposal.status !== "ready" || !proposal.issueNumber) {
+    return Response.json({ error: `dream proposal is ${proposal.status}; ensemble deliberation must finish first` }, { status: 409 });
+  }
+  try {
+    const triage = await triggerRoboOmp({ mode: "triage", issue: `${proposal.repo}#${proposal.issueNumber}` });
+    if (!triage.ok) throw new Error(`native RoboOMP triage failed: ${triage.status} ${(await triage.text()).slice(0, 500)}`);
+    const directive = await sendDreamDirective(proposal, proposal.issueNumber, proposal.issueBody);
+    if (!directive.ok) throw new Error(`native RoboOMP directive failed: ${directive.status} ${(await directive.text()).slice(0, 500)}`);
+    const dispatched = db.transitionDream(proposal.id, ["ready"], "dispatched", { error: null });
+    return Response.json({
+      proposal: dispatched,
+      triage: await triage.json().catch(() => ({})),
+      directive: await directive.json().catch(() => ({})),
+    });
+  } catch (error) {
+    const ready = db.transitionDream(proposal.id, ["ready"], "ready", { error: message(error) });
+    return Response.json({ error: message(error), proposal: ready }, { status: 502 });
   }
 }
 
@@ -470,7 +556,7 @@ async function sendDreamDirective(proposal: DreamProposal, issueNumber: number, 
     action: "created",
     comment: {
       id: Date.now(),
-      body: `@${config.persephoneBotLogin} This issue proposal was approved by ${config.dream.directiveAuthor}. Implement the approved brief below, verify it against the repository, and submit the resulting branch through the normal publication gate.\n\n${proposal.implementationBrief}`,
+      body: `@${config.persephoneBotLogin} This issue completed Persephone's configured ensemble deliberation and was dispatched ${config.dream.automatic ? "by the explicitly enabled timer policy" : `by ${config.dream.directiveAuthor}`}. Implement the approved brief below, verify it against the repository, and submit the resulting branch through the normal publication gate.\n\n${proposal.implementationBrief}\n\nAfter opening the PR, post its link on this issue and mention @${config.dream.directiveAuthor} for review.`,
       user: { login: config.dream.directiveAuthor },
       author_association: "OWNER",
     },
@@ -565,13 +651,18 @@ async function processEnsembleQueue(): Promise<void> {
   } finally {
     ensembleBusy = false;
   }
+    try {
+      await reconcileDreamIssue(job.repo, job.issueNumber);
+    } catch (error) {
+      console.error(`[persephone-github] dream reconciliation failed for ${job.repo}#${job.issueNumber}: ${message(error)}`);
+    }
 }
 
 function ensemblePrompt(persona: GitHubEnsemblePersona, job: EnsembleJob): string {
   if (!existsSync(persona.promptFile)) throw new Error(`Persona prompt missing: ${persona.promptFile}`);
   const role = readFileSync(persona.promptFile, "utf8").trim();
   return `${role}\n\nYou are one member of Persephone's GitHub ensemble. Evaluate the post below independently.\n\n` +
-    `Hard contract:\n- You have no tools and no GitHub credentials.\n- Add at most one genuinely useful technical observation, tradeoff, risk, correction, or precise question.\n- If your take would be agreement, praise, paraphrase, filler, roleplay-only banter, or a duplicate of the post, skip.\n- Do not claim that you tested or inspected anything not present below.\n- Keep a comment under 1200 characters.\n- Return only JSON: {"action":"comment","body":"..."} or {"action":"skip","reason":"..."}.\n\n` +
+    `Hard contract:\n- You have no tools and no GitHub credentials.\n- Post exactly one genuinely useful technical observation, tradeoff, risk, correction, or precise question.\n- If you find no objection, ask the one concrete acceptance or compatibility question your persona would need answered; never substitute praise, paraphrase, filler, or roleplay-only banter.\n- Do not claim that you tested or inspected anything not present below.\n- Keep the comment under 1200 characters.\n- Return only JSON: {"action":"comment","body":"..."}. Use skip only when the supplied material is malformed or no defensible technical contribution is possible.\n\n` +
     `Repository: ${job.repo}\nThread: #${job.issueNumber} ${job.issueTitle}\nThread body:\n${job.issueBody.slice(0, 12_000)}\n\n` +
     `Persephone post (${job.sourceUrl}):\n${job.sourceBody.slice(0, 12_000)}`;
 }
@@ -793,6 +884,7 @@ function message(error: unknown): string { return error instanceof Error ? error
 async function shutdown(): Promise<void> {
   clearInterval(ensembleTimer);
   clearInterval(dreamTimer);
+  clearInterval(dreamReconcileTimer);
   server.stop(false);
   await ensemblePool.close();
   await dreamPool.close();
@@ -803,11 +895,11 @@ async function shutdown(): Promise<void> {
 const DASHBOARD_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Persephone · RoboOMP approvals</title><style>
-:root{color-scheme:dark;font:15px system-ui;background:#121116;color:#eee}body{max-width:1500px;margin:auto;padding:24px}button,input{font:inherit;background:#24212b;color:#eee;border:1px solid #51485f;border-radius:7px;padding:8px}button{cursor:pointer}.grid{display:grid;grid-template-columns:360px 1fr;gap:16px}.card{border:1px solid #403948;border-radius:10px;padding:14px;margin:8px 0;background:#1a181f}.pending{border-color:#a87f32}.approved{border-color:#3e996a}.rejected,.conflicted{border-color:#a34d58}pre{white-space:pre-wrap;overflow:auto;max-height:70vh;background:#0c0b0e;padding:14px;border-radius:8px}.row{display:flex;gap:8px;flex-wrap:wrap}small{color:#aaa}@media(max-width:900px){.grid{grid-template-columns:1fr}}</style></head>
-<body><h1>Persephone · RoboOMP</h1><p>Two deliberate gates: approve a grounded issue proposal, then approve the exact implementation diff. Approval never merges or changes a worktree.</p>
+:root{color-scheme:dark;font:15px system-ui;background:#121116;color:#eee}body{max-width:1500px;margin:auto;padding:24px}button,input{font:inherit;background:#24212b;color:#eee;border:1px solid #51485f;border-radius:7px;padding:8px}button{cursor:pointer}.grid{display:grid;grid-template-columns:360px 1fr;gap:16px}.card{border:1px solid #403948;border-radius:10px;padding:14px;margin:8px 0;background:#1a181f}.pending,.issued{border-color:#a87f32}.approved,.ready,.dispatched,.published{border-color:#3e996a}.rejected,.conflicted,.failed{border-color:#a34d58}pre{white-space:pre-wrap;overflow:auto;max-height:70vh;background:#0c0b0e;padding:14px;border-radius:8px}.row{display:flex;gap:8px;flex-wrap:wrap}small{color:#aaa}@media(max-width:900px){.grid{grid-template-columns:1fr}}</style></head>
+<body><h1>Persephone · RoboOMP</h1><p>Lifecycle: inspect a grounded proposal, publish its issue, let all three identities deliberate, then dispatch native RoboOMP. Implementation diffs remain exact and reviewable; nothing here merges a pull request.</p>
 <div class="row"><input id="token" type="password" placeholder="approval token"><button onclick="saveToken()">Use token</button><button onclick="load()">Refresh</button></div>
 <div class="card"><b>Manual native RoboOMP</b><div class="row"><input id="issue" placeholder="owner/repo#123"><button onclick="triage()">Triage issue</button><input id="repo" placeholder="owner/repo"><input id="pr" type="number" placeholder="PR"><button onclick="review()">Review PR diff</button></div><small>Both operations retain RoboOMP's repository allowlist, worktree isolation, durable queue, and OMP session behavior.</small></div>
-<div class="card"><b>Read-only dream analysis</b><div class="row"><input id="dreamRepo" placeholder="configured owner/repo"><button onclick="runDream()">Analyze now</button></div><small>The analyzer has read/grep/glob only. A draft below creates no issue until approved.</small><div id="dreams"></div></div>
+<div class="card"><b>Read-only dream analysis</b><div class="row"><input id="dreamRepo" placeholder="configured owner/repo"><button onclick="runDream()">Analyze now</button></div><small>The analyzer may read the checkout and consult only the configured local Firecrawl/Camofox research services. Mode: ${config.dream.automatic ? "automatic issue, ensemble, dispatch, and exact-diff publication" : "human issue approval, human dispatch, and human exact-diff approval"}.</small><div id="dreams"></div></div>
 <h2>Implementation diffs</h2>
 <div class="grid"><div id="list"></div><div><div id="meta" class="card">Choose a proposal.</div><pre id="diff"></pre></div></div>
 <script>
@@ -815,7 +907,8 @@ let token=sessionStorage.getItem('persephoneToken')||'';document.querySelector('
 function saveToken(){token=document.querySelector('#token').value;sessionStorage.setItem('persephoneToken',token);load()}
 async function api(path,options={}){options.headers={...(options.headers||{}),Authorization:'Bearer '+token,'Content-Type':'application/json'};const r=await fetch(path,options);const j=await r.json();if(!r.ok)throw new Error(j.error||JSON.stringify(j));return j}
 function esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function load(){try{[proposals,dreams]=await Promise.all([api('/api/proposals'),api('/api/dreams')]);document.querySelector('#list').innerHTML=proposals.map(p=>'<div class="card '+esc(p.status)+'" onclick="show(\''+p.id+'\')"><b>'+esc(p.repo)+'#'+p.issueNumber+'</b><br>'+esc(p.status)+' · '+p.id+'<br><small>'+esc(p.branch)+'<br>'+new Date(p.updatedAt).toLocaleString()+'</small></div>').join('')||'<div class="card">No implementation diffs.</div>';document.querySelector('#dreams').innerHTML=dreams.map(d=>'<div class="card '+esc(d.status)+'"><b>'+esc(d.repo)+' · '+esc(d.title)+'</b><br>'+esc(d.status)+' · '+d.id+'<br><small>base '+esc(d.baseSha)+' · '+new Date(d.updatedAt).toLocaleString()+'</small><p>'+esc(d.rationale)+'</p><details><summary>Issue and implementation brief</summary><pre>'+esc(d.issueBody)+'\n\n--- implementation brief ---\n'+esc(d.implementationBrief)+'</pre></details><div class="row"><button onclick="actDream(\''+d.id+'\',\'approve\')">Approve issue + start RoboOMP</button><button onclick="actDream(\''+d.id+'\',\'reject\')">Reject</button></div></div>').join('')||'<p><small>No dream proposals.</small></p>'}catch(e){alert(e.message)}}
+function dreamControls(d){if(d.status==='pending')return '<button onclick="actDream(\''+d.id+'\',\'approve\')">Publish issue for ensemble review</button><button onclick="actDream(\''+d.id+'\',\'reject\')">Reject proposal</button>';if(d.status==='issued')return '<small>Waiting for Opsec bro, longtimeuser4, and Ancient Guru.</small><button onclick="actDream(\''+d.id+'\',\'reject\')">Stop before dispatch</button>';if(d.status==='ready')return '<button onclick="actDream(\''+d.id+'\',\'dispatch\')">Dispatch native RoboOMP</button><button onclick="actDream(\''+d.id+'\',\'reject\')">Reject before dispatch</button>';if(d.status==='failed'&&d.issueNumber)return '<button onclick="actDream(\''+d.id+'\',\'approve\')">Retry failed ensemble identity</button>';if(d.status==='dispatched')return '<small>Native RoboOMP has been dispatched. Its exact implementation diff will appear below.</small>';return ''}
+async function load(){try{[proposals,dreams]=await Promise.all([api('/api/proposals'),api('/api/dreams')]);document.querySelector('#list').innerHTML=proposals.map(p=>'<div class="card '+esc(p.status)+'" onclick="show(\''+p.id+'\')"><b>'+esc(p.repo)+'#'+p.issueNumber+'</b><br>'+esc(p.status)+' · '+p.id+'<br><small>'+esc(p.branch)+'<br>'+new Date(p.updatedAt).toLocaleString()+'</small></div>').join('')||'<div class="card">No implementation diffs.</div>';document.querySelector('#dreams').innerHTML=dreams.map(d=>'<div class="card '+esc(d.status)+'"><b>'+esc(d.repo)+' · '+esc(d.title)+'</b><br>'+esc(d.status)+' · '+d.id+(d.issueUrl?' · <a href="'+esc(d.issueUrl)+'" target="_blank" rel="noopener noreferrer">issue #'+d.issueNumber+'</a>':'')+'<br><small>base '+esc(d.baseSha)+' · '+new Date(d.updatedAt).toLocaleString()+'</small><p>'+esc(d.rationale)+'</p>'+(d.error?'<p>'+esc(d.error)+'</p>':'')+'<details><summary>Issue and implementation brief</summary><pre>'+esc(d.issueBody)+'\n\n--- implementation brief ---\n'+esc(d.implementationBrief)+'</pre></details><div class="row">'+dreamControls(d)+'</div></div>').join('')||'<p><small>No dream proposals.</small></p>'}catch(e){alert(e.message)}}
 function show(id){const p=proposals.find(x=>x.id===id);document.querySelector('#meta').innerHTML='<b>'+esc(p.repo)+'#'+p.issueNumber+'</b> · '+esc(p.status)+'<br><small>base '+esc(p.baseSha)+'<br>head '+esc(p.headSha)+'</small><div class="row"><button onclick="act(\''+id+'\',\'approve\')">Approve exact diff</button><button onclick="act(\''+id+'\',\'reject\')">Reject</button></div>';document.querySelector('#diff').textContent=p.diffText}
 async function act(id,action){try{await api('/api/proposals/'+id+'/'+action,{method:'POST'});await load();show(id)}catch(e){alert(e.message)}}
 async function actDream(id,action){try{await api('/api/dreams/'+id+'/'+action,{method:'POST'});await load()}catch(e){alert(e.message)}}

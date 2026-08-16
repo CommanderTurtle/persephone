@@ -44,7 +44,39 @@ describe("GitHub bridge database", () => {
     db.close();
   });
 
-  test("does not run a new dream schedule immediately and preserves the two approval stages", () => {
+  test("waits for every persona and retries only failed sidecars", () => {
+    const db = database();
+    for (const personaId of ["opsec-bro", "longtimeuser4", "ancient-guru"]) {
+      expect(db.enqueueEnsemble({
+        personaId, repo: "owner/project", issueNumber: 10,
+        sourceCommentId: 202, sourceBody: "A concrete proposal",
+        issueTitle: "But what about bounded retries?", issueBody: "Body",
+        sourceUrl: "https://github.com/owner/project/issues/10",
+      })).toBe(true);
+    }
+    const first = db.claimEnsemble()!;
+    db.finishEnsemble(first.id, "commented", "One security concern.");
+    const second = db.claimEnsemble()!;
+    db.finishEnsemble(second.id, "skipped", undefined, "Malformed source");
+    const third = db.claimEnsemble()!;
+    db.finishEnsemble(third.id, "failed", undefined, "GitHub App unavailable");
+
+    expect(db.ensembleProgress("OWNER/PROJECT", 10, ["opsec-bro", "longtimeuser4", "ancient-guru"])).toEqual({
+      complete: true,
+      failed: [third.personaId],
+    });
+    expect(db.retryFailedEnsemble("owner/project", 10)).toBe(1);
+    const retried = db.claimEnsemble()!;
+    expect(retried.personaId).toBe(third.personaId);
+    db.finishEnsemble(retried.id, "commented", "Recovered comment.");
+    expect(db.ensembleProgress("owner/project", 10, ["opsec-bro", "longtimeuser4", "ancient-guru"])).toEqual({
+      complete: true,
+      failed: [],
+    });
+    db.close();
+  });
+
+  test("does not run a new dream schedule immediately and preserves deliberation before dispatch", () => {
     const db = database();
     const now = 1_800_000_000_000;
     db.initializeDreamSchedule(["owner/project"], now);
@@ -59,7 +91,9 @@ describe("GitHub bridge database", () => {
     expect(db.hasPendingDream("OWNER/PROJECT")).toBe(true);
     expect(db.transitionDream(dream.id, ["pending"], "approved")?.status).toBe("approved");
     expect(db.transitionDream(dream.id, ["approved"], "issued", { issueNumber: 12, issueUrl: "https://example/12" })?.issueNumber).toBe(12);
-    expect(db.hasPendingDream("owner/project")).toBe(false);
+    expect(db.hasPendingDream("owner/project")).toBe(true);
+    expect(db.transitionDream(dream.id, ["issued"], "ready")?.status).toBe("ready");
+    expect(db.transitionDream(dream.id, ["ready"], "dispatched")?.status).toBe("dispatched");
     db.close();
   });
 });

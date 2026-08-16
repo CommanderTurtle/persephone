@@ -25,6 +25,10 @@ services:
       ROBOMP_GH_PROXY_HMAC_KEY: ${ROBOMP_GH_PROXY_HMAC_KEY:-}
       PERSEPHONE_ENSEMBLE_OMP_COMMAND: omp
       PERSEPHONE_ENSEMBLE_1_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_1_HMAC_KEY:-}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      CAMOFOX_API_KEY: ${CAMOFOX_API_KEY:-}
+      PERSEPHONE_FIRECRAWL_URL: ${PERSEPHONE_FIRECRAWL_URL:-http://host.docker.internal:3002}
+      PERSEPHONE_CAMOFOX_URL: ${PERSEPHONE_CAMOFOX_URL:-http://host.docker.internal:9377}
       PERSEPHONE_ENSEMBLE_2_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_2_HMAC_KEY:-}
       PERSEPHONE_ENSEMBLE_3_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_3_HMAC_KEY:-}
       OTEL_SDK_DISABLED: "true"
@@ -41,6 +45,8 @@ services:
       - ${HOME}/.omp/agent/models.container.yml:/srv/agent-home-stage/.omp/agent/models.yml:ro
       - ${HOME}/.agent/AGENT.md:/srv/agent-home-stage/.agent/AGENTS.md:ro
       - ${HOME}/.agent/rules:/srv/agent-home-stage/.agent/rules:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:${PERSEPHONE_GITHUB_PORT:-6544}:8082"
 

@@ -166,10 +166,10 @@ The optional composition layer adds four bounded features:
 
 - a stricter repository-and-actor webhook firewall;
 - exact base/head diff approval before native RoboOMP may push or open a PR;
-- a read-only dream loop that drafts grounded `But what about …?` issues for human approval before native implementation;
+- a read-only dream loop that drafts grounded `But what about …?` issues with local Firecrawl/Camofox research, then waits for issue publication and implementation dispatch unless its explicit automatic mode is enabled;
 - three credential-isolated, comment-only persona identities for one meaningful take apiece on Persephone's own posts.
 
-Nothing auto-merges. Dream issue creation and implementation publication are separate human gates. Run `./scripts/robomp-github.sh` against the native RoboOMP checkout; see [GitHub bot integration](docs/GITHUB-BOT.md) for the complete setup and trust model.
+Nothing auto-merges. Manual mode separates issue publication, three-persona deliberation, native RoboOMP dispatch, and exact-diff publication. Explicit automatic mode may advance only its own dispatched dream issue through those stages; ordinary RoboOMP work remains human-gated. Run `./scripts/robomp-github.sh` against the native RoboOMP checkout; see [GitHub bot integration](docs/GITHUB-BOT.md) for the complete setup and trust model.
 
 ## Zed
 
