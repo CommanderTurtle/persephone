@@ -31,7 +31,7 @@ Slack Socket/Web API ┘                                      └─ durable rep
 - Each adapter is disabled by default, separately allowlisted, and separately health-checked.
 - Commands, steering, follow-ups, model selection, and approvals behave consistently because those semantics live above the transport boundary.
 
-GitHub is intentionally not treated as a fourth chat transport. OMP already ships `roboomp`, whose webhook verification, durable issue state, isolated worktrees, OMP RPC sessions, and credential-separated `gh-proxy` are better suited to GitHub automation. Persephone only includes optional local health discovery for that native service.
+GitHub is intentionally not treated as a fourth chat transport. OMP already ships `roboomp`, whose webhook verification, durable issue state, isolated worktrees, OMP RPC sessions, and credential-separated `gh-proxy` are better suited to GitHub automation. Persephone can report its health and optionally compose fail-closed intake, read-only issue dreaming, separate persona identities, and exact-diff publication approval around the native service; it does not replace RoboOMP's worker.
 
 ## Web tooling
 

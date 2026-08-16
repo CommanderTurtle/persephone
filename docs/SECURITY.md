@@ -18,6 +18,11 @@ Persephone assumes one trusted local owner and treats every transported message,
 12. Self-hosted Firecrawl always fails closed; a local outage cannot disclose a query to a hosted provider.
 13. Firecrawl and Camofox API keys are read only from the owner-only Persephone environment file and are not written to logs.
 14. Passive OMP and marketplace update checks are disabled in every managed profile; update traffic occurs only after an explicit operator command.
+15. RoboOMP GitHub intake is repository-and-actor allowlisted before native event routing.
+16. Native RoboOMP push and PR operations require approval of the exact recorded base/head pair; worktree drift invalidates approval.
+17. Dream analysis receives read/grep/glob only, no session, no extensions or skills, and a child environment scrubbed of GitHub/approval secrets.
+18. Approved dream issues pass through an issue-only capability process. Ensemble identities pass through independent comment-only capability processes.
+19. Dream issue approval and implementation-diff approval are distinct; no component can approve itself or merge automatically.
 
 A Signal group or shared Discord/Slack channel is one shared route. Any permitted member of that route can respond to its pending approval prompt; use an allowlisted direct message for owner-only approval control. Slack threads are isolated from their parent channel, and Discord thread channels have their own route.
 
@@ -46,10 +51,12 @@ Persephone itself makes network calls only to:
 - the configured Firecrawl search endpoint;
 - the configured Camofox browser endpoint;
 - the configured local roboomp health endpoint, only when its integration is enabled;
+- native RoboOMP and gh-proxy addresses inside the private Compose network when the GitHub bridge is enabled;
+- GitHub's API only from native gh-proxy and the explicitly enabled issue-only/comment-only identity sidecars;
 - whatever model/MCP endpoints OMP itself is configured to use.
 
 The default Firecrawl and Camofox addresses are loopback. Operators may choose another trusted LAN URL, but should enable each service's authentication and populate its corresponding environment key before doing so. Firecrawl has no hosted fallback, Exa is disabled in every managed profile, and automatic OMP/marketplace update checks are off.
 
 OMP retains explicit operator-facing cloud commands as part of its native installation (for example `/share`, Smithery, and provider login), and Context Mode retains its optional Insight launcher. Persephone neither removes nor calls them. Its always-on rule forbids agents from invoking those surfaces in this local-only configuration; using one requires deliberate operator reconfiguration.
 
-Discord and Slack necessarily send their enabled channel traffic to those platforms. They are opt-in and do not create a third-party relay beyond the platform the operator selected. It does not start OMP Collab, another remote relay, analytics, or a credential broker. GitHub credentials remain inside roboomp's `gh-proxy` boundary and are never read by Persephone.
+Discord and Slack necessarily send their enabled channel traffic to those platforms. They are opt-in and do not create a third-party relay beyond the platform the operator selected. It does not start OMP Collab, another remote relay, analytics, or a credential broker. The main GitHub credential remains inside RoboOMP's `gh-proxy`; optional persona tokens live only in comment-only sidecars, and the approved dream author token lives only in an issue-only sidecar. OMP children receive none of them.

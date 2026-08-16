@@ -47,7 +47,23 @@ Signal  Discord  Slack       cron       local API
 - Context Mode: bulk corpus/output containment;
 - Codebase Memory: code graph, coverage and architecture queries;
 - Camofox: agent browser transport.
-- OMP roboomp: GitHub webhook, issue/PR automation, isolated worktrees, and GitHub credentials.
+- OMP roboomp: GitHub queueing, issue/PR automation, isolated worktrees, persistent issue sessions, and the main mutation proxy.
+
+### GitHub composition layer
+
+Persephone's GitHub bridge is a policy boundary around native RoboOMP, not a
+second orchestrator. It verifies a narrower actor/repository allowlist before
+forwarding signed webhooks and interposes on RoboOMP's existing HMAC proxy
+path. Read/comment/label/review capabilities continue unchanged; push and PR
+publication pause on an exact base/head proposal stored in a separate SQLite
+database.
+
+The dream analyzer creates a detached worktree from RoboOMP's native shared
+clone, removes all bridge/GitHub secrets from the OMP child, and exposes only
+read/grep/glob. An approved issue passes through an issue-only sidecar, then
+returns to RoboOMP's normal per-issue queue and worktree. Three optional
+ensemble workers have no tools and post through three separate comment-only
+token compartments. They do not share the main GitHub token.
 
 ## Web ownership
 
