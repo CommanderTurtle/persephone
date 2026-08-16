@@ -73,14 +73,40 @@ immediately scan every repository. Only one pending/approved dream may exist
 per repository. A failed issue publication is idempotent and can be retried.
 There is no automatic merge or self-approval path.
 
-## Ensemble identities and avatars
+## GitHub identities and avatars
 
-GitHub avatars belong to GitHub identities, so each persona needs a distinct
-GitHub account or GitHub App installation and a repository-scoped token. Set
-the account's avatar on GitHub. The three tokens enter three separate sidecars,
-not Persephone or OMP. A sidecar verifies `/user` against its configured login
-before posting and exposes only `POST /v1/comment` on the private Compose
-network.
+Use one human-created GitHub machine account for native RoboOMP's main bot.
+GitHub's terms permit one free machine account in addition to a free personal
+account, so the three ensemble identities should be private GitHub Apps rather
+than three more machine accounts. Each App has its own name, slug, avatar,
+private key, installation, and narrow repository permissions.
+
+For a personal-account repository such as `CommanderTurtle/diogenes`, GitHub
+currently does not allow a fine-grained PAT to contribute as a repository
+collaborator. Give the main machine account collaborator access and use a
+classic PAT with `public_repo` for a public repository (`repo` only if a
+private repository is deliberately added later). Add the classic `workflow`
+scope to the main RoboOMP token only when a permitted branch may add or update
+`.github/workflows`; the Diogenes upstream-sync test needs it. RoboOMP's HMAC
+proxy and both repository allowlists still confine where that credential may
+be used. Create a second `public_repo` token without `workflow` on the same
+account for the approved-dream issue sidecar, so it can be revoked
+independently.
+
+Create each ensemble App with webhooks disabled, no account or organization
+permissions, and only these repository permissions:
+
+- Metadata: read-only (automatic);
+- Issues: read and write;
+- Pull requests: read and write.
+
+Install each App with **Only select repositories** and select only the
+allowlisted repository. Download each App private key into
+`~/.config/persephone/github-apps/ensemble-1.pem` (then `-2.pem` and `-3.pem`)
+and set mode `0600`. The comment sidecar mints an installation token on demand,
+renews it before GitHub's one-hour expiry, verifies the App slug, and exposes
+only `POST /v1/comment` on the private Compose network. The private key and
+installation token never enter Persephone's OMP workers or native RoboOMP.
 
 For each main Persephone issue, PR, or issue comment, every persona is queued
 once. The model must skip agreement, praise, repetition, and roleplay-only
@@ -93,18 +119,20 @@ separate tokens and capability sidecars enforce authority.
 ## Configuration
 
 Start with native RoboOMP's `.env.example`; it remains authoritative for its
-GitHub App/token, bot login, HMAC keys, webhook secret, repository allowlist,
+main token, bot login, HMAC keys, webhook secret, repository allowlist,
 maintainers, model, and worker settings. The important values must agree:
 
 ```dotenv
 # Native python/robomp/.env
-ROBOMP_REPO_ALLOWLIST=CommanderTurtle/persephone
+ROBOMP_REPO_ALLOWLIST=CommanderTurtle/diogenes
 ROBOMP_MAINTAINER_LOGINS=CommanderTurtle
-ROBOMP_BOT_LOGIN=your-persephone-bot
+ROBOMP_BOT_LOGIN=your-main-machine-account
+ROBOMP_GIT_AUTHOR_NAME=Persephone
+ROBOMP_GIT_AUTHOR_EMAIL=your-main-machine-account@users.noreply.github.com
 GITHUB_WEBHOOK_SECRET=generate-a-long-random-value
 ROBOMP_REPLAY_TOKEN=generate-another-long-random-value
 ROBOMP_GH_PROXY_HMAC_KEY=generate-another-long-random-value
-GITHUB_TOKEN=repository-scoped-main-bot-token
+GITHUB_TOKEN=classic-public_repo-plus-workflow-token-for-main-machine-account
 ```
 
 In `~/.config/persephone/.env`:
@@ -112,9 +140,11 @@ In `~/.config/persephone/.env`:
 ```dotenv
 PERSEPHONE_GITHUB_APPROVAL_TOKEN=human-dashboard-bearer-token
 PERSEPHONE_GITHUB_ISSUE_HMAC_KEY=issue-sidecar-capability-key
+PERSEPHONE_GITHUB_ISSUE_TOKEN=second-classic-public_repo-token-for-main-machine-account
 
-PERSEPHONE_ENSEMBLE_1_LOGIN=first-account
-PERSEPHONE_ENSEMBLE_1_GITHUB_TOKEN=first-comment-token
+PERSEPHONE_ENSEMBLE_1_LOGIN=first-app-slug
+PERSEPHONE_ENSEMBLE_1_APP_ID=decimal-app-id
+PERSEPHONE_ENSEMBLE_1_INSTALLATION_ID=decimal-installation-id
 PERSEPHONE_ENSEMBLE_1_HMAC_KEY=first-capability-key
 # Repeat for identities 2 and 3.
 ```
@@ -126,13 +156,13 @@ complete GitHub shape from `persephone.config.example.json`. In particular:
 {
   "roboomp": {
     "github": {
-      "allowedRepositories": ["CommanderTurtle/persephone"],
+      "allowedRepositories": ["CommanderTurtle/diogenes"],
       "allowedActors": ["CommanderTurtle"],
-      "persephoneBotLogin": "your-persephone-bot",
+      "persephoneBotLogin": "your-main-machine-account",
       "dream": {
         "enabled": true,
         "intervalMinutes": 1440,
-        "repositories": ["CommanderTurtle/persephone"],
+        "repositories": ["CommanderTurtle/diogenes"],
         "directiveAuthor": "CommanderTurtle"
       },
       "ensemble": {
@@ -141,7 +171,7 @@ complete GitHub shape from `persephone.config.example.json`. In particular:
           {
             "id": "persona-1",
             "name": "Ensemble I",
-            "botLogin": "first-account",
+            "botLogin": "first-app-slug",
             "promptFile": "rules/ensemble/persona-1.md",
             "commentProxyUrl": "http://persephone-ensemble-1:8091",
             "commentProxyKeyEnv": "PERSEPHONE_ENSEMBLE_1_HMAC_KEY"

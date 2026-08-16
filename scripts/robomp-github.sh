@@ -27,6 +27,9 @@ fi
 
 export PERSEPHONE_ROOT="$persephone_root"
 export PERSEPHONE_CONFIG_FILE="$config_file"
+export PERSEPHONE_GITHUB_APP_KEYS_DIR="$(dirname "$config_file")/github-apps"
+mkdir -p -- "$PERSEPHONE_GITHUB_APP_KEYS_DIR"
+chmod 0700 -- "$PERSEPHONE_GITHUB_APP_KEYS_DIR"
 overlay="$persephone_root/integrations/robomp/docker-compose.persephone.yml"
 persephone_env="$(dirname "$config_file")/.env"
 compose=(docker compose --project-directory "$robomp_root" --env-file "$robomp_root/.env")

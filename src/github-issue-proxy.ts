@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 import { verifyInternalRequest } from "./github-security.ts";
+import { GitHubAuth, tokenHeaders } from "./github-auth.ts";
 
-const token = requiredEnv("GITHUB_TOKEN");
+const auth = GitHubAuth.fromEnv();
 const hmacKey = requiredEnv("PERSEPHONE_ISSUE_PROXY_HMAC_KEY");
 const expectedLogin = normalizeLogin(requiredEnv("PERSEPHONE_GITHUB_LOGIN"));
 const allowedRepositories = new Set(csv(requiredEnv("PERSEPHONE_REPO_ALLOWLIST")).map((value) => value.toLowerCase()));
@@ -68,8 +69,7 @@ console.log(`[persephone-issue-proxy] ${expectedLogin} listening on ${server.url
 
 async function verifyIdentity(): Promise<string> {
   if (authenticatedLogin) return authenticatedLogin;
-  const user = await github("/user");
-  const actual = normalizeLogin(String(user.login || ""));
+  const actual = normalizeLogin(await auth.login());
   if (actual !== expectedLogin) throw new Error(`token identity ${actual || "unknown"} does not match configured ${expectedLogin}`);
   authenticatedLogin = actual;
   return actual;
@@ -93,20 +93,28 @@ async function findMarker(repo: string, marker: string, login: string): Promise<
 }
 
 async function github(endpoint: string, init: RequestInit = {}): Promise<any> {
-  const response = await fetch(`https://api.github.com${endpoint}`, {
+  let access = await auth.accessToken();
+  let response = await requestGitHub(endpoint, access.token, init);
+  if (response.status === 401 && auth.source.mode === "app") {
+    auth.invalidate();
+    access = await auth.accessToken(true);
+    response = await requestGitHub(endpoint, access.token, init);
+  }
+  if (!response.ok) throw new Error(`GitHub HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
+  return response.status === 204 ? {} : response.json();
+}
+
+function requestGitHub(endpoint: string, token: string, init: RequestInit): Promise<Response> {
+  return fetch(`https://api.github.com${endpoint}`, {
     ...init,
     headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
+      ...tokenHeaders(token),
       "Content-Type": "application/json",
       "User-Agent": "Persephone-issue-proxy",
-      "X-GitHub-Api-Version": "2022-11-28",
       ...(init.headers || {}),
     },
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw new Error(`GitHub HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
-  return response.status === 204 ? {} : response.json();
 }
 
 function requiredEnv(name: string): string {

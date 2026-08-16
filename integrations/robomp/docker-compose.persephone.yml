@@ -45,7 +45,8 @@ services:
       - "127.0.0.1:${PERSEPHONE_GITHUB_PORT:-6544}:8082"
 
   # The proactive loop cannot reach the general GitHub proxy. Only this
-  # compartment holds the main bot token, and it exposes issue creation only.
+  # compartment holds a separately revocable token for the main bot identity,
+  # and it exposes issue creation only.
   persephone-issue-author:
     profiles: ["dream"]
     image: robomp:dev
@@ -53,7 +54,7 @@ services:
     restart: unless-stopped
     command: ["bun", "/persephone/src/github-issue-proxy.ts"]
     environment:
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_TOKEN: ${PERSEPHONE_GITHUB_ISSUE_TOKEN:-}
       PERSEPHONE_ISSUE_PROXY_HMAC_KEY: ${PERSEPHONE_GITHUB_ISSUE_HMAC_KEY:-}
       PERSEPHONE_GITHUB_LOGIN: ${ROBOMP_BOT_LOGIN:-}
       PERSEPHONE_REPO_ALLOWLIST: ${ROBOMP_REPO_ALLOWLIST:-}
@@ -63,7 +64,9 @@ services:
 
   # These services are deliberately tiny credential compartments. The only
   # externally callable operation implemented by their process is POST
-  # /v1/comment. Distinct tokens produce distinct GitHub accounts/avatars.
+  # /v1/comment. Distinct GitHub Apps produce distinct bot names/avatars and
+  # mint repository-scoped installation tokens on demand. Static tokens remain
+  # available as a compatibility fallback.
   persephone-ensemble-1:
     profiles: ["ensemble"]
     image: robomp:dev
@@ -72,12 +75,16 @@ services:
     command: ["bun", "/persephone/src/github-comment-proxy.ts"]
     environment:
       GITHUB_TOKEN: ${PERSEPHONE_ENSEMBLE_1_GITHUB_TOKEN:-}
+      GITHUB_APP_ID: ${PERSEPHONE_ENSEMBLE_1_APP_ID:-}
+      GITHUB_APP_INSTALLATION_ID: ${PERSEPHONE_ENSEMBLE_1_INSTALLATION_ID:-}
+      GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/persephone-github/ensemble-1.pem
       PERSEPHONE_COMMENT_PROXY_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_1_HMAC_KEY:-}
       PERSEPHONE_GITHUB_LOGIN: ${PERSEPHONE_ENSEMBLE_1_LOGIN:-}
       PERSEPHONE_REPO_ALLOWLIST: ${ROBOMP_REPO_ALLOWLIST:-}
     networks: [default, robomp_internal]
     volumes:
       - ${PERSEPHONE_ROOT:?PERSEPHONE_ROOT must point to the Persephone checkout}:/persephone:ro
+      - ${PERSEPHONE_GITHUB_APP_KEYS_DIR:?PERSEPHONE_GITHUB_APP_KEYS_DIR must point to the private-key directory}:/run/secrets/persephone-github:ro
 
   persephone-ensemble-2:
     profiles: ["ensemble"]
@@ -87,12 +94,16 @@ services:
     command: ["bun", "/persephone/src/github-comment-proxy.ts"]
     environment:
       GITHUB_TOKEN: ${PERSEPHONE_ENSEMBLE_2_GITHUB_TOKEN:-}
+      GITHUB_APP_ID: ${PERSEPHONE_ENSEMBLE_2_APP_ID:-}
+      GITHUB_APP_INSTALLATION_ID: ${PERSEPHONE_ENSEMBLE_2_INSTALLATION_ID:-}
+      GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/persephone-github/ensemble-2.pem
       PERSEPHONE_COMMENT_PROXY_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_2_HMAC_KEY:-}
       PERSEPHONE_GITHUB_LOGIN: ${PERSEPHONE_ENSEMBLE_2_LOGIN:-}
       PERSEPHONE_REPO_ALLOWLIST: ${ROBOMP_REPO_ALLOWLIST:-}
     networks: [default, robomp_internal]
     volumes:
       - ${PERSEPHONE_ROOT:?PERSEPHONE_ROOT must point to the Persephone checkout}:/persephone:ro
+      - ${PERSEPHONE_GITHUB_APP_KEYS_DIR:?PERSEPHONE_GITHUB_APP_KEYS_DIR must point to the private-key directory}:/run/secrets/persephone-github:ro
 
   persephone-ensemble-3:
     profiles: ["ensemble"]
@@ -102,9 +113,13 @@ services:
     command: ["bun", "/persephone/src/github-comment-proxy.ts"]
     environment:
       GITHUB_TOKEN: ${PERSEPHONE_ENSEMBLE_3_GITHUB_TOKEN:-}
+      GITHUB_APP_ID: ${PERSEPHONE_ENSEMBLE_3_APP_ID:-}
+      GITHUB_APP_INSTALLATION_ID: ${PERSEPHONE_ENSEMBLE_3_INSTALLATION_ID:-}
+      GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/persephone-github/ensemble-3.pem
       PERSEPHONE_COMMENT_PROXY_HMAC_KEY: ${PERSEPHONE_ENSEMBLE_3_HMAC_KEY:-}
       PERSEPHONE_GITHUB_LOGIN: ${PERSEPHONE_ENSEMBLE_3_LOGIN:-}
       PERSEPHONE_REPO_ALLOWLIST: ${ROBOMP_REPO_ALLOWLIST:-}
     networks: [default, robomp_internal]
     volumes:
       - ${PERSEPHONE_ROOT:?PERSEPHONE_ROOT must point to the Persephone checkout}:/persephone:ro
+      - ${PERSEPHONE_GITHUB_APP_KEYS_DIR:?PERSEPHONE_GITHUB_APP_KEYS_DIR must point to the private-key directory}:/run/secrets/persephone-github:ro
