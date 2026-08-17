@@ -30,11 +30,13 @@ This matrix is the implementation answer to the original OMP migration analysis.
 |Puppeteer/Chromium browser|OMP|Same-name tool is replaced; the Puppeteer backend is never started|
 |OMP-specific autonomous memory|OMP Mnemopi|Enabled only for the interactive profile, project-scoped and locally embedded|
 |Hermes gateway|Hermes|Not required by Persephone; may coexist during migration|
-|Orca desktop UI|Orca|Excluded; Zed + OMP already cover it|
+|Orca desktop UI|Orca|Optional stock review surface for RoboOMP PRs; never an agent runtime dependency|
 |`pi-gateway`|Third party|Excluded: outdated runtime and prompt-only policy boundary|
 |`remote-pi` cloud relay|Third party|Excluded: plaintext relay and Node runtime conflict with requirements|
 |OMP collaboration relay|OMP|Excluded by default; no cloud relay is started|
-|GitHub issue/PR agent|OMP roboomp|Reused as its independently isolated service; optional health integration|
+|GitHub issue/PR agent|OMP roboomp|Pinned native service with slot users, issue worktrees/sessions, credential proxy, lifecycle CLI, and health integration|
+|Proposal-only repository audits|Persephone seed + OMP roboomp|Narrow issue creation in the credential proxy; native triage and trusted implementation directive|
+|GitHub diff review|Orca|Host-clone review handoff; RoboOMP's isolated worktree stays private|
 
 ## Original analysis: completion check
 
@@ -46,7 +48,7 @@ This matrix is the implementation answer to the original OMP migration analysis.
 - Operational profiles: **uses OMP native profiles**, with per-route selection.
 - Signal gateway: **implemented against signal-cli's local HTTP/SSE API**.
 - Discord and Slack gateways: **implemented as independent Bun-native platform adapters**.
-- GitHub bot: **delegated to OMP's native roboomp implementation, with health integration and no duplicated credentials or webhook path**.
+- GitHub bot: **delegated to OMP's native roboomp implementation, with a pinned deployment, health/lifecycle commands, and no duplicated worker pool or webhook path**.
 - Local model support: **left native to OMP**, with route-level provider/model selection.
 - Context Mode, Retrieval, Librarian, Codebase Memory, Camofox: **native integration implemented**.
 - Self-hosted Firecrawl search and Camofox-first browsing: **implemented through native OMP extension seams**.

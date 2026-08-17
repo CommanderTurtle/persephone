@@ -31,7 +31,7 @@ Slack Socket/Web API ┘                                      └─ durable rep
 - Each adapter is disabled by default, separately allowlisted, and separately health-checked.
 - Commands, steering, follow-ups, model selection, and approvals behave consistently because those semantics live above the transport boundary.
 
-GitHub is intentionally not treated as a fourth chat transport. OMP already ships `roboomp`, whose webhook verification, durable issue state, isolated worktrees, OMP RPC sessions, and credential-separated `gh-proxy` are better suited to GitHub automation. Persephone only includes optional local health discovery for that native service.
+GitHub is intentionally not treated as a fourth chat transport. OMP already ships `roboomp`, whose webhook verification, durable issue state, isolated worktrees, OMP RPC sessions, and credential-separated `gh-proxy` are better suited to GitHub automation. Persephone now supplies a pinned build/lifecycle layer, native manual-triage commands, a proposal-only audit seed, and an Orca review handoff. It does not duplicate RoboOMP's worker pool, issue state, prompt workflow, webhook route, or GitHub mutation tools.
 
 ## Web tooling
 
@@ -91,6 +91,25 @@ uv run scripts/orca-deb.py install --private
 ```
 
 The second command needs an interactive `sudo` prompt. `--private` installs a per-user desktop override using Orca's documented `DO_NOT_TRACK=1` and `ORCA_TELEMETRY_DISABLED=1` kill switches. Packaged Orca follows its own stable auto-update channel; the helper remains useful for a deterministic version check, first install, or package repair without maintaining an Orca fork.
+
+Orca is also the preferred review surface for native RoboOMP pull requests. The
+review command registers an ordinary host clone, where the operator can fetch
+the PR branch and inspect its graph and file diff. RoboOMP retains exclusive
+ownership of the issue worktree. GitCito remains an optional unmodified fallback
+viewer; its current application has no supported JSON-RPC, ACP, or plugin seam
+for agent integration.
+
+## OpenShell boundary
+
+OpenShell's custom images, Landlock/filesystem policy, default-deny egress, and
+managed local inference are attractive for a future worker-level deployment.
+It is not used to wrap the full service today. OpenShell refuses a root agent
+process, while RoboOMP's root orchestrator assigns each concurrent issue to a
+different unprivileged UID and reaps processes left by that slot. Flattening the
+service into one OpenShell user would trade away a proven native boundary. A
+future integration must create one OpenShell sandbox per OMP worker leaf and
+leave the queue plus credential proxy outside; until that seam exists upstream,
+native RoboOMP is the stronger coherent implementation.
 
 ## Revised verdict
 

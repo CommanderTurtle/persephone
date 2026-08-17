@@ -18,6 +18,21 @@ Signal  Discord  Slack       cron       local API
  local Firecrawl    Camofox browser + MCP
 ```
 
+GitHub work is a separate native OMP lane:
+
+```text
+GitHub webhook/manual triage ─ durable RoboOMP queue
+                                      │
+                         issue worktree + JSONL session
+                                      │
+                           unprivileged slot OMP RPC
+                                      │ audited host tools
+                          HMAC-only GitHub proxy ─ GitHub
+
+scheduled audit seed ─ create one enhancement issue ─ native manual triage
+Orca host clone ─ fetch PR branch ─ human diff/review/approval
+```
+
 ## Ownership
 
 ### OMP owns
@@ -39,6 +54,8 @@ Signal  Discord  Slack       cron       local API
 - separate Signal, Discord, and Slack transports and allowlists;
 - correlation of RPC extension UI requests with remote replies;
 - a small status/control API and systemd unit.
+- lifecycle/configuration of the pinned native RoboOMP deployment;
+- the narrow scheduled-audit issue seed and Orca host-clone handoff.
 
 ### Existing repositories own
 
@@ -47,7 +64,9 @@ Signal  Discord  Slack       cron       local API
 - Context Mode: bulk corpus/output containment;
 - Codebase Memory: code graph, coverage and architecture queries;
 - Camofox: agent browser transport.
-- OMP roboomp: GitHub webhook, issue/PR automation, isolated worktrees, and GitHub credentials.
+- OMP roboomp: GitHub webhook, queue, issue/PR automation, worker-slot isolation, worktrees, sessions, prompts, and audited GitHub tools;
+- RoboOMP gh-proxy: the GitHub token and all authenticated GitHub transport;
+- Orca: optional host-side graph, worktree, and diff review.
 
 ## Web ownership
 
@@ -99,3 +118,8 @@ This mechanism complements rather than replaces OMP approval policy. A user-leve
 ## Orca influence
 
 Orca's MIT-licensed source was studied for its run/task/dispatch state model, heartbeat reconciliation, decision gates, and crash lifecycle. Persephone uses those architectural lessons in an independent, much smaller implementation. Orca's Electron UI, Monaco editor, provider gateway, and database code are neither vendored nor copied because OMP and Zed already own those surfaces.
+
+For GitHub review, stock Orca is used directly rather than merely studied. The
+native RoboOMP branch is fetched into an ordinary host clone registered with
+Orca. The agent's private worktree is never registered as an Orca worktree, so
+the orchestration and review owners cannot race over the same checkout.

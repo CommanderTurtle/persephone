@@ -18,6 +18,9 @@ Persephone assumes one trusted local owner and treats every transported message,
 12. Self-hosted Firecrawl always fails closed; a local outage cannot disclose a query to a hosted provider.
 13. Firecrawl and Camofox API keys are read only from the owner-only Persephone environment file and are not written to logs.
 14. Passive OMP and marketplace update checks are disabled in every managed profile; update traffic occurs only after an explicit operator command.
+15. The native RoboOMP orchestrator receives no GitHub token; a separate HMAC-authenticated proxy is the sole token holder.
+16. Each concurrent RoboOMP issue runs under a distinct unprivileged Linux UID in its own worktree and persistent OMP session.
+17. Scheduled repository audits are proposal-only enhancements and cannot bypass native trusted-maintainer authorization.
 
 A Signal group or shared Discord/Slack channel is one shared route. Any permitted member of that route can respond to its pending approval prompt; use an allowlisted direct message for owner-only approval control. Slack threads are isolated from their parent channel, and Discord thread channels have their own route.
 
@@ -53,3 +56,7 @@ The default Firecrawl and Camofox addresses are loopback. Operators may choose a
 OMP retains explicit operator-facing cloud commands as part of its native installation (for example `/share`, Smithery, and provider login), and Context Mode retains its optional Insight launcher. Persephone neither removes nor calls them. Its always-on rule forbids agents from invoking those surfaces in this local-only configuration; using one requires deliberate operator reconfiguration.
 
 Discord and Slack necessarily send their enabled channel traffic to those platforms. They are opt-in and do not create a third-party relay beyond the platform the operator selected. It does not start OMP Collab, another remote relay, analytics, or a credential broker. GitHub credentials remain inside roboomp's `gh-proxy` boundary and are never read by Persephone.
+
+The GitHub integration defaults to zero public submitter allowance. Repository ownership/collaboration and the explicit maintainer/unlimited lists are the only native bypasses. The dashboard binds to loopback; a webhook becomes public only through an operator-controlled HTTPS ingress. Neither the lifecycle wrapper nor Orca can merge a pull request, force-push, or write to a production checkout.
+
+OpenShell was evaluated but is not wrapped around the whole RoboOMP service. OpenShell rejects a root child, while native RoboOMP uses its root orchestrator boundary to assign and reap isolated slot UIDs. Replacing that service identity would weaken the native per-issue boundary. Any future OpenShell mode must isolate one worker leaf rather than flatten all issues into one sandbox user.

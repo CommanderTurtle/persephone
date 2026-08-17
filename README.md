@@ -22,6 +22,7 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 - A real OMP-compatible `browser` tool backed by local Camofox rather than Puppeteer/Chromium.
 - A small OMP extension with `/persephone`, `persephone_status`, and `persephone_submit`.
 - Zed-first operation through OMP's own `omp acp` bridge.
+- A pinned native RoboOMP deployment with isolated issue worktrees, credential-proxy separation, proposal-only scheduled audits, and Orca review handoff.
 
 ## What it deliberately does not add
 
@@ -160,7 +161,26 @@ Cron is evaluated in the service's local timezone. A minute is recorded before i
 
 ## GitHub automation
 
-OMP already ships `python/robomp`, a purpose-built GitHub issue/PR orchestrator with webhook HMAC verification, allowlisted repositories, durable SQLite state, per-issue OMP RPC sessions, isolated worktrees, and a credential-holding `gh-proxy` sidecar. Persephone deliberately reuses that service instead of treating GitHub as a chat channel. Set `roboomp.enabled` after deploying it and `persephone doctor` will include its local `/healthz` endpoint. See [GitHub bot integration](docs/GITHUB-BOT.md).
+OMP already ships `python/robomp`, a purpose-built GitHub issue/PR orchestrator with webhook HMAC verification, allowlisted repositories, durable SQLite state, per-issue OMP RPC sessions, isolated worktrees, and a credential-holding `gh-proxy` sidecar. Persephone builds that native service from a pinned OMP commit and exposes lifecycle commands without replacing its queue, worker, prompt, or GitHub tools:
+
+```bash
+persephone git-agent init
+persephone git-agent doctor
+persephone git-agent build
+persephone git-agent up
+persephone git-agent triage CommanderTurtle/repository#123
+persephone git-agent review ~/Hermes/repository 123
+```
+
+The optional audit loop creates one proposal-only issue through the credential proxy, then hands it to native manual triage. Implementation still requires a trusted maintainer directive:
+
+```bash
+persephone git-agent dream CommanderTurtle/repository
+persephone git-agent dream-timer-enable CommanderTurtle/repository \
+  'Sun *-*-* 05:00:00'
+```
+
+Set `roboomp.enabled` after the service is healthy and `persephone doctor` will include its local `/healthz` endpoint. See [GitHub bot integration](docs/GITHUB-BOT.md) for the GitHub permissions, webhook events, isolation boundary, fork-reconciliation workflow, and Orca review path.
 
 ## Zed
 
