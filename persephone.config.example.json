@@ -43,65 +43,7 @@
   },
   "roboomp": {
     "enabled": false,
-    "url": "http://127.0.0.1:6543",
-    "github": {
-      "enabled": false,
-      "orchestratorUrl": "http://robomp:8080",
-      "upstreamProxyUrl": "http://gh-proxy:8081",
-      "workspaceRoot": "/data/workspaces",
-      "allowedRepositories": [],
-      "allowedActors": [],
-      "persephoneBotLogin": "",
-      "webhookSecretEnv": "GITHUB_WEBHOOK_SECRET",
-      "approvalTokenEnv": "PERSEPHONE_GITHUB_APPROVAL_TOKEN",
-      "replayTokenEnv": "ROBOMP_REPLAY_TOKEN",
-      "proposalMaxDiffBytes": 2000000,
-      "dream": {
-        "enabled": false,
-        "automatic": false,
-        "intervalMinutes": 1440,
-        "repositories": [],
-        "directiveAuthor": "",
-        "profile": "persephone-dream",
-        "cwdRoot": "/data/persephone-dreams",
-        "thinking": "high",
-        "promptFile": "rules/github-dream.md",
-        "issueProxyUrl": "http://persephone-issue-author:8092",
-        "issueProxyKeyEnv": "PERSEPHONE_GITHUB_ISSUE_HMAC_KEY"
-      },
-      "ensemble": {
-        "enabled": false,
-        "profile": "persephone-ensemble",
-        "cwd": "/tmp/persephone-ensemble",
-        "thinking": "high",
-        "personas": [
-          {
-            "id": "opsec-bro",
-            "name": "Opsec bro",
-            "botLogin": "",
-            "promptFile": "rules/ensemble/persona-1.md",
-            "commentProxyUrl": "http://persephone-ensemble-1:8091",
-            "commentProxyKeyEnv": "PERSEPHONE_ENSEMBLE_1_HMAC_KEY"
-          },
-          {
-            "id": "longtimeuser4",
-            "name": "longtimeuser4",
-            "botLogin": "",
-            "promptFile": "rules/ensemble/persona-2.md",
-            "commentProxyUrl": "http://persephone-ensemble-2:8091",
-            "commentProxyKeyEnv": "PERSEPHONE_ENSEMBLE_2_HMAC_KEY"
-          },
-          {
-            "id": "ancient-guru",
-            "name": "Ancient Guru",
-            "botLogin": "",
-            "promptFile": "rules/ensemble/persona-3.md",
-            "commentProxyUrl": "http://persephone-ensemble-3:8091",
-            "commentProxyKeyEnv": "PERSEPHONE_ENSEMBLE_3_HMAC_KEY"
-          }
-        ]
-      }
-    }
+    "url": "http://127.0.0.1:8080"
   },
   "integrations": {
     "servicesRoot": "~/Hermes",

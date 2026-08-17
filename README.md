@@ -27,7 +27,7 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 
 OMP already provides editing, Hashline snapshots, LSP, plan-mode enforcement, tasks, subagents, swarm DAGs, async jobs, artifacts, compaction, ACP, model routing, MCP, skills, rules, and extension hooks. Persephone does not wrap or reimplement any of those. Its two web adapters use OMP's documented same-name tool registration: `web_search` retains OMP's request shape while transport goes to local Firecrawl, and `browser` retains OMP's open/run/close workflow while tab operations go to local Camofox.
 
-It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, or another memory product. OMP's native Mnemopi backend remains OMP-owned; the interactive profile can use its project-scoped local SQLite memory without involving Persephone. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the platform-adapter boundary, but Hermes is not a runtime dependency. GitHub issue automation remains OMP's native `roboomp` service; Persephone can add fail-closed intake, issue-draft, identity, and exact-diff approval boundaries without creating another GitHub worker.
+It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, or another memory product. OMP's native Mnemopi backend remains OMP-owned; the interactive profile can use its project-scoped local SQLite memory without involving Persephone. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the platform-adapter boundary, but Hermes is not a runtime dependency. GitHub issue automation remains OMP's native `roboomp` service rather than a second, less-isolated implementation inside Persephone.
 
 For operators who separately want Orca's desktop worktree view, `scripts/orca-deb.py` provides a version-aware installer for the official stable Debian package. It does not build Orca, clone its source, or make Orca a Persephone dependency. See [the OMP comparison](docs/OMP-THOUGHTS-COMPARISON.md#optional-stock-orca-companion).
 
@@ -160,16 +160,7 @@ Cron is evaluated in the service's local timezone. A minute is recorded before i
 
 ## GitHub automation
 
-OMP already ships `python/robomp`, a purpose-built GitHub issue/PR orchestrator with webhook HMAC verification, allowlisted repositories, durable SQLite state, per-issue OMP RPC sessions, isolated worktrees, and a credential-holding `gh-proxy` sidecar. Persephone deliberately reuses it instead of treating GitHub as a chat channel.
-
-The optional composition layer adds four bounded features:
-
-- a stricter repository-and-actor webhook firewall;
-- exact base/head diff approval before native RoboOMP may push or open a PR;
-- a read-only dream loop that drafts grounded `But what about …?` issues with local Firecrawl/Camofox research, then waits for issue publication and implementation dispatch unless its explicit automatic mode is enabled;
-- three credential-isolated, comment-only persona identities for one meaningful take apiece on Persephone's own posts.
-
-Nothing auto-merges. Manual mode separates issue publication, three-persona deliberation, native RoboOMP dispatch, and exact-diff publication. Explicit automatic mode may advance only its own dispatched dream issue through those stages; ordinary RoboOMP work remains human-gated. Run `./scripts/robomp-github.sh` against the native RoboOMP checkout; see [GitHub bot integration](docs/GITHUB-BOT.md) for the complete setup and trust model.
+OMP already ships `python/robomp`, a purpose-built GitHub issue/PR orchestrator with webhook HMAC verification, allowlisted repositories, durable SQLite state, per-issue OMP RPC sessions, isolated worktrees, and a credential-holding `gh-proxy` sidecar. Persephone deliberately reuses that service instead of treating GitHub as a chat channel. Set `roboomp.enabled` after deploying it and `persephone doctor` will include its local `/healthz` endpoint. See [GitHub bot integration](docs/GITHUB-BOT.md).
 
 ## Zed
 

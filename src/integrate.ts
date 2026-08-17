@@ -65,19 +65,6 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
   configureWorkerProfile(omp, config.omp.profile, config, modelRoles, results);
   refreshManagedProfileConfig(workerAgent);
 
-  const githubProfiles = new Set<string>();
-  if (config.roboomp.github.dream.enabled) githubProfiles.add(config.roboomp.github.dream.profile);
-  if (config.roboomp.github.ensemble.enabled) githubProfiles.add(config.roboomp.github.ensemble.profile);
-  for (const profile of githubProfiles) {
-    const agent = ompAgentDir(profile);
-    if (agent !== interactiveAgent) synchronizeProfileConfiguration(interactiveAgent, agent);
-    configureWorkerProfile(omp, profile, config, modelRoles, results, `github-worker-profile:${profile}`);
-    if (config.roboomp.github.dream.enabled && profile === config.roboomp.github.dream.profile) {
-      configureDreamResearchProfile(omp, profile, results);
-    }
-    refreshManagedProfileConfig(agent);
-  }
-
   const services = config.integrations.servicesRoot;
   const publicEntries: Record<string, unknown> = {};
   if (config.integrations.contextMode) {
@@ -307,27 +294,6 @@ function configureWorkerProfile(
   ];
   if (modelRoles) values.unshift(["modelRoles", JSON.stringify(modelRoles)]);
   configureProfile(omp, profile, values, results, resultName);
-}
-
-function configureDreamResearchProfile(
-  omp: string,
-  profile: string,
-  results: IntegrationResult[],
-): void {
-  configureProfile(omp, profile, [
-    ["tools.approvalMode", "yolo"],
-    ["tools.approval.read", "allow"],
-    ["tools.approval.grep", "allow"],
-    ["tools.approval.glob", "allow"],
-    ["tools.approval.web_search", "allow"],
-    ["tools.approval.browser", "allow"],
-    ["tools.approval.bash", "deny"],
-    ["tools.approval.edit", "deny"],
-    ["tools.approval.write", "deny"],
-    ["tools.approval.delete", "deny"],
-    ["tools.approval.move", "deny"],
-    ["tools.approval.task", "deny"],
-  ], results, `github-research-policy:${profile}`);
 }
 
 function configureProfile(

@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "./omp-api.ts";
-import { loadConfig, loadWebToolConfig } from "./config.ts";
+import { loadConfig } from "./config.ts";
 import { controlRequest } from "./control-client.ts";
 import type { PersephoneConfig } from "./types.ts";
 import { formatFirecrawlResult, searchLocalFirecrawl, type FirecrawlSearchParams } from "./web.ts";
@@ -97,7 +97,7 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
 function registerWebTools(pi: ExtensionAPI): void {
   let config: PersephoneConfig;
   try {
-    config = loadWebToolConfig();
+    config = loadConfig();
   } catch {
     // A bad Persephone config must not prevent vanilla OMP from starting. The
     // command and status tools surface the configuration error to the operator.

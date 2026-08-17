@@ -34,7 +34,7 @@ This matrix is the implementation answer to the original OMP migration analysis.
 |`pi-gateway`|Third party|Excluded: outdated runtime and prompt-only policy boundary|
 |`remote-pi` cloud relay|Third party|Excluded: plaintext relay and Node runtime conflict with requirements|
 |OMP collaboration relay|OMP|Excluded by default; no cloud relay is started|
-|GitHub issue/PR agent|OMP roboomp + Persephone policy bridge|Native worker/session/worktree retained; optional intake, dream-issue, identity, and exact-diff approval gates|
+|GitHub issue/PR agent|OMP roboomp|Reused as its independently isolated service; optional health integration|
 
 ## Original analysis: completion check
 
@@ -46,7 +46,7 @@ This matrix is the implementation answer to the original OMP migration analysis.
 - Operational profiles: **uses OMP native profiles**, with per-route selection.
 - Signal gateway: **implemented against signal-cli's local HTTP/SSE API**.
 - Discord and Slack gateways: **implemented as independent Bun-native platform adapters**.
-- GitHub bot: **delegated to OMP's native roboomp implementation; the optional bridge reuses its signed webhook/proxy paths and confines extra identity tokens to issue-only or comment-only sidecars**.
+- GitHub bot: **delegated to OMP's native roboomp implementation, with health integration and no duplicated credentials or webhook path**.
 - Local model support: **left native to OMP**, with route-level provider/model selection.
 - Context Mode, Retrieval, Librarian, Codebase Memory, Camofox: **native integration implemented**.
 - Self-hosted Firecrawl search and Camofox-first browsing: **implemented through native OMP extension seams**.
