@@ -46,6 +46,7 @@
   "files": [
     "src",
     "scripts",
+    "integrations",
     "rules",
     "skills",
     "docs",

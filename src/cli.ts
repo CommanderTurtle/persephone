@@ -52,6 +52,9 @@ try {
     case "route":
       route(args);
       break;
+    case "git-agent":
+      runGitAgent(args);
+      break;
     case "zed":
       launchZed(args[0]);
       break;
@@ -236,6 +239,19 @@ function launchZed(directory?: string): void {
   console.log("Use OMP's native `omp acp` agent entry in Zed; Persephone does not replace the ACP bridge.");
 }
 
+function runGitAgent(args: string[]): void {
+  const script = path.join(repoRoot(), "scripts", "robomp.sh");
+  if (!existsSync(script)) throw new Error(`Native RoboOMP lifecycle script is missing: ${script}`);
+  chmodSync(script, 0o755);
+  const child = spawnSync(script, args, {
+    cwd: repoRoot(),
+    stdio: "inherit",
+    env: { ...process.env, OTEL_SDK_DISABLED: "true", DO_NOT_TRACK: "1" },
+  });
+  if (child.error) throw child.error;
+  if (child.status !== 0) process.exitCode = child.status ?? 1;
+}
+
 function printIntegrations(results: ReturnType<typeof integrate>): void {
   for (const result of results) console.log(`${result.status.padEnd(10)} ${result.name.padEnd(22)} ${result.detail}`);
   if (results.some((result) => result.status === "failed")) process.exitCode = 1;
@@ -264,6 +280,7 @@ function help(): void {
   persephone schedule add NAME "CRON" "PROMPT" [--to CHANNEL:PEER]
   persephone schedule remove NAME
   persephone route list
+  persephone git-agent help
   persephone zed [DIRECTORY]
   persephone update | uninstall
 `);

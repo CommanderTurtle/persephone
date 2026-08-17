@@ -46,7 +46,7 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
   },
   roboomp: {
     enabled: false,
-    url: "http://127.0.0.1:8080",
+    url: "http://127.0.0.1:6543",
   },
   integrations: {
     servicesRoot: "~/Hermes",
