@@ -182,9 +182,8 @@ function integrateLibrarian(
     timeout: 660000,
   };
   const privateFile = path.join(privateAgent, "mcp.json");
-  rememberMcp(privateFile, [...Object.keys(publicEntries), "librarian-okf"]);
-  mergeMcp(privateFile, {
-    ...publicEntries,
+  rememberMcp(privateFile, [...readMcpServerNames(privateFile), "librarian-okf"]);
+  replaceMcp(privateFile, {
     "librarian-okf": {
       type: "stdio",
       command: bun,
@@ -206,7 +205,7 @@ function integrateLibrarian(
   results.push({
     name: "librarian",
     status: "integrated",
-    detail: `Public MCP plus isolated '${profile}' OMP RPC profile with Retrieval and code tools`,
+    detail: `Public MCP plus isolated '${profile}' OMP RPC profile containing only deterministic OKF tools`,
   });
 }
 
@@ -220,7 +219,7 @@ function configureInteractiveProfile(
   const skills = activeSkillDirectories(config, true);
   const values: Array<readonly [string, string]> = [
     ["advisor.enabled", "true"],
-    ["advisor.subagents", "false"],
+    ["task.agentAdvisor", JSON.stringify({ task: "off" })],
     ["advisor.syncBacklog", "1"],
     ["advisor.immuneTurns", "3"],
     ["task.maxConcurrency", "4"],
@@ -236,14 +235,10 @@ function configureInteractiveProfile(
     ["mnemopi.proactiveLinking", "false"],
     ["mnemopi.injectionTokenLimit", "2000"],
     ["mnemopi.recallLimit", "6"],
-    ["compaction.strategy", "snapcompact"],
-    ["compaction.remoteEnabled", "false"],
+    ["compaction.methodOrder", JSON.stringify(["snapcompact", "soft"])],
     ["compaction.remoteStreamingV2Enabled", "false"],
     ["inspect_image.mode", "auto"],
     ["exa.enabled", "false"],
-    ["exa.enableSearch", "false"],
-    ["exa.enableResearcher", "false"],
-    ["exa.enableWebsets", "false"],
     ["retry.modelFallback", "false"],
     ["startup.checkUpdate", "false"],
     ["marketplace.autoUpdate", "off"],
@@ -269,20 +264,16 @@ function configureWorkerProfile(
   const skills = activeSkillDirectories(config, false);
   const values: Array<readonly [string, string]> = [
     ["advisor.enabled", "false"],
-    ["advisor.subagents", "false"],
+    ["task.agentAdvisor", JSON.stringify({ task: "off" })],
     ["async.enabled", "false"],
     ["task.maxConcurrency", "1"],
     ["task.maxRecursionDepth", "1"],
     ["task.batch", "true"],
     ["memory.backend", "off"],
-    ["compaction.strategy", "snapcompact"],
-    ["compaction.remoteEnabled", "false"],
+    ["compaction.methodOrder", JSON.stringify(["snapcompact", "soft"])],
     ["compaction.remoteStreamingV2Enabled", "false"],
     ["inspect_image.mode", "auto"],
     ["exa.enabled", "false"],
-    ["exa.enableSearch", "false"],
-    ["exa.enableResearcher", "false"],
-    ["exa.enableWebsets", "false"],
     ["retry.modelFallback", "false"],
     ["startup.checkUpdate", "false"],
     ["marketplace.autoUpdate", "off"],
@@ -416,6 +407,30 @@ export function mergeMcp(file: string, entries: Record<string, unknown>): void {
   config.mcpServers = isRecord(config.mcpServers) ? config.mcpServers : {};
   for (const [name, entry] of Object.entries(entries)) config.mcpServers[name] = entry;
   writeJsonAtomic(file, config);
+}
+
+function replaceMcp(file: string, entries: Record<string, unknown>): void {
+  let config: McpConfig = {};
+  if (existsSync(file)) {
+    try {
+      config = JSON.parse(readFileSync(file, "utf8")) as McpConfig;
+    } catch (error) {
+      throw new Error(`Refusing to overwrite malformed OMP MCP config ${file}: ${String(error)}`);
+    }
+  }
+  config.$schema ||= MCP_SCHEMA;
+  config.mcpServers = { ...entries };
+  writeJsonAtomic(file, config);
+}
+
+function readMcpServerNames(file: string): string[] {
+  if (!existsSync(file)) return [];
+  try {
+    const config = JSON.parse(readFileSync(file, "utf8")) as McpConfig;
+    return Object.keys(isRecord(config.mcpServers) ? config.mcpServers : {});
+  } catch (error) {
+    throw new Error(`Refusing to replace malformed OMP MCP config ${file}: ${String(error)}`);
+  }
 }
 
 function synchronizeProfileConfiguration(sourceAgent: string, targetAgent: string): void {

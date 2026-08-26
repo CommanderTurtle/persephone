@@ -103,7 +103,7 @@ Important behavior:
 
 - `advisor.syncBacklog` controls whether the primary loop waits for a small advice backlog before continuing;
 - `advisor.immuneTurns` prevents repetitive interruptions for a number of turns;
-- `advisor.subagents` determines whether delegated-agent work is also watched;
+- `task.agentAdvisor` selects advisor behavior per delegated agent (`"on"`, `"off"`, or a model pattern); the generic delegated agent is keyed as `task`;
 - the default Advisor tool grant is already read-only; current OMP approval-wraps explicitly granted mutating tools as well, but a passive reviewer should still remain read-only;
 - each watched turn is another inference request, even when the Advisor has nothing useful to add.
 
@@ -115,9 +115,12 @@ modelRoles:
 
 advisor:
   enabled: true
-  subagents: false
   syncBacklog: "1"
   immuneTurns: 3
+
+task:
+  agentAdvisor:
+    task: "off"
 ```
 
 Use it first in the TUI and Zed ACP sessions, where its intervention is visible. Do not enable it for every Persephone message immediately: that would double routine gateway inference and add latency to short Signal/Discord/Slack turns. The same local endpoint can serve both roles, and vLLM can batch concurrent requests, but OMP does not deduplicate their prompt work.
@@ -126,11 +129,7 @@ Advisor is most valuable for long refactors, architecture-sensitive work, unfami
 
 ## Exa
 
-Exa is a hosted neural/semantic web-search and research platform. Its practical differentiator is meaning-based ranking rather than only keyword matching. OMP exposes three related features:
-
-- ordinary Exa search;
-- a Researcher workflow;
-- Websets, which creates and manages structured sets of discovered entities.
+Exa is a hosted neural/semantic web-search platform. Its practical differentiator is meaning-based ranking rather than only keyword matching. Current OMP exposes it as a web-search provider behind the single `exa.enabled` switch; the former standalone Researcher and Websets toggles have been removed.
 
 OMP can use an Exa API key through its normal credential path. More importantly for privacy, ordinary Exa search also has a keyless public MCP fallback. A missing API key therefore does not prove that a query remains local. Query text, domain filters, and date filters are sent to Exa whenever that provider is selected.
 
@@ -139,9 +138,6 @@ For this workstation, Exa adds little that justifies another outbound owner. Fir
 ```yaml
 exa:
   enabled: false
-  enableSearch: false
-  enableResearcher: false
-  enableWebsets: false
 ```
 
 If Exa is ever desired, put it in a clearly named cloud-research OMP profile rather than the default profile. Authenticate intentionally, enable only search at first, and treat every submitted query as public-cloud egress. Persephone should not proxy or disguise it as local search.
@@ -237,7 +233,7 @@ providers:
           - image
 ```
 
-This belongs in `~/.omp/agent/models.yml`. It retains dynamic vLLM discovery while overriding only the incorrect capability. The resolved catalog then reports `input: ["text", "image"]`, allowing native screenshots and Snapcompact. Keep `compaction.strategy: snapcompact`.
+This belongs in `~/.omp/agent/models.yml`. It retains dynamic vLLM discovery while overriding only the incorrect capability. The resolved catalog then reports `input: ["text", "image"]`, allowing native screenshots and Snapcompact. Keep `compaction.methodOrder: [snapcompact, soft]`.
 
 `provider.appendOnlyContext: auto` should remain `auto` until prefix caching is confirmed on the vLLM endpoint. If vLLM prefix caching is deliberately enabled and measured, forcing append-only context can improve cache reuse. It should not be changed merely because the context window is large.
 
@@ -359,12 +355,11 @@ OMP's config CLI treats `modelRoles` as one record, so set that value atomically
 omp config set modelRoles '{"default":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","smol":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","slow":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","vision":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","plan":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","designer":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","commit":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","tiny":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","task":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym","advisor":"vllm/compute1/Agents-A1-GPTQ-INT4-Sym"}'
 
 omp config set advisor.enabled true
-omp config set advisor.subagents false
 omp config set advisor.syncBacklog 1
 omp config set advisor.immuneTurns 3
+omp config set task.agentAdvisor '{"task":"off"}'
 
-omp config set compaction.strategy snapcompact
-omp config set compaction.remoteEnabled false
+omp config set compaction.methodOrder '["snapcompact","soft"]'
 omp config set compaction.remoteStreamingV2Enabled false
 omp config set inspect_image.mode auto
 omp config set memory.backend mnemopi
@@ -381,9 +376,6 @@ omp config set task.batch true
 omp config set prewalk.enabled false
 
 omp config set exa.enabled false
-omp config set exa.enableSearch false
-omp config set exa.enableResearcher false
-omp config set exa.enableWebsets false
 omp config set retry.modelFallback false
 
 omp config set startup.checkUpdate false
