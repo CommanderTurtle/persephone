@@ -7,3 +7,5 @@ node_modules/
 .persephone/
 dist/
 coverage/
+__pycache__/
+*.py[cod]
