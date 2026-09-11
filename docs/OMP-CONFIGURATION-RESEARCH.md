@@ -239,7 +239,7 @@ This belongs in `~/.omp/agent/models.yml`. It retains dynamic vLLM discovery whi
 
 `tools.format: auto` is also the correct first choice. OMP will prefer provider-native tool calls and can fall back to an owned dialect when the model catalog says native tools are unsupported. Change it only in response to a reproducible parsing failure.
 
-`features.unexpectedStopDetection: true` is a reasonable local-model hardening option. It can detect a quantized model ending in an obviously incomplete state. It is not a substitute for tests or Advisor review.
+`features.unexpectedStopDetection: smart` is a reasonable local-model hardening option. It includes the mechanical empty-stop retry and uses the configured small model to classify text-only stops. It is not a substitute for tests or Advisor review.
 
 ## Task and long-horizon settings
 
@@ -342,7 +342,7 @@ tools:
   format: auto
 
 features:
-  unexpectedStopDetection: true
+  unexpectedStopDetection: smart
 ```
 
 Keep the current project/profile settings, local model catalog, and MCP registry intact around this patch. Do not replace the Firecrawl extension with OMP's hosted Firecrawl provider, and do not enable OMP's built-in Chromium browser while Camofox is authoritative.
@@ -361,7 +361,7 @@ omp config set task.agentAdvisor '{"task":"off"}'
 
 omp config set compaction.methodOrder '["snapcompact","soft"]'
 omp config set compaction.remoteStreamingV2Enabled false
-omp config set inspect_image.mode auto
+omp config set images.describeForTextModels true
 omp config set memory.backend mnemopi
 omp config set mnemopi.scoping per-project
 omp config set mnemopi.llmMode smol
@@ -385,7 +385,7 @@ omp config set providers.fetch native
 omp config set provider.appendOnlyContext auto
 omp config set tools.xdev true
 omp config set tools.format auto
-omp config set features.unexpectedStopDetection true
+omp config set features.unexpectedStopDetection smart
 omp config set skills.enableSkillCommands true
 ```
 
