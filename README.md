@@ -101,6 +101,11 @@ Leave it disabled while Hermes owns the same Signal account. During a cutover, s
 
 The default configuration expects Localflame at `~/Deepseek/localflame`, Firecrawl at `http://127.0.0.1:3002`, and Camofox at `http://127.0.0.1:9377`. `persephone integrate` delegates to each project's checked-in integration script with its configured service URL. Both services may be keyless on a trusted local host; set `FIRECRAWL_API_KEY` or `CAMOFOX_API_KEY` in `~/.config/persephone/.env` when their local authentication is enabled.
 
+Codebase Memory is also reconciled by its own `integrate-local.sh --target omp`
+contract. Persephone no longer copies its binary path or MCP definition, so a
+Codebase Memory update has one owner and its public/private OMP profile rules
+remain identical whether invoked directly or through `persephone integrate`.
+
 Persephone no longer registers a second `web_search` implementation. Localflame is the single owner of the self-hosted Firecrawl transport and exposes `firecrawl_search`, `firecrawl_scrape`, `firecrawl_read`, `firecrawl_find`, `firecrawl_outline`, `firecrawl_images`, and `firecrawl_resources`. OMP's existing web providers are preserved; the small `localflame` routing skill tells agents to prefer the indexed Firecrawl path without removing other operator-configured choices. Exa remains disabled in Persephone's managed profiles because it is a hosted search service rather than software that can be installed locally.
 
 Integration also disables OMP's passive startup and marketplace update checks in every managed profile. Updates remain explicit operator actions; no background version request is part of the normal agent lifecycle.

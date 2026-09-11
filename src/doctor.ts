@@ -49,6 +49,10 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
     const installer = path.join(config.integrations.servicesRoot, "camofox-mcp", "integrate.sh");
     results.push({ check: "integration:camofox", ok: existsSync(installer), detail: installer });
   }
+  if (config.integrations.codebaseMemory) {
+    const installer = path.join(config.integrations.servicesRoot, "codebase-memory-mcp", "integrate-local.sh");
+    results.push({ check: "integration:codebase-memory", ok: existsSync(installer), detail: installer });
+  }
   const delegatedOwnership = delegatedMcpOwnership();
   results.push({
     check: "integration:delegated-ownership",
@@ -284,7 +288,7 @@ function expectedMcpNames(config: PersephoneConfig): string[] {
 function delegatedMcpOwnership(): string[] {
   const file = path.join(stateRoot(), "integration-backup.json");
   if (!existsSync(file)) return [];
-  const delegated = new Set(["context-mode", "retrieval", "localflame", "librarian", "librarian-okf", "camofox"]);
+  const delegated = new Set(["context-mode", "retrieval", "localflame", "librarian", "librarian-okf", "camofox", "codebase-memory"]);
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8")) as { mcp?: Record<string, Record<string, unknown>> };
     const entries: string[] = [];

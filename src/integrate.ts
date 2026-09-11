@@ -62,22 +62,7 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
   configureWorkerProfile(omp, config.omp.profile, config, modelRoles, results);
   refreshManagedProfileConfig(workerAgent);
 
-  const services = config.integrations.servicesRoot;
   const publicEntries: Record<string, unknown> = {};
-
-  if (config.integrations.codebaseMemory) {
-    const root = path.join(services, "codebase-memory-mcp");
-    const binary = path.join(root, "build", "c", "codebase-memory-mcp");
-    if (existsSync(binary)) {
-      publicEntries["codebase-memory"] = {
-        type: "stdio",
-        command: binary,
-        cwd: root,
-        env: { CBM_AUTO_INDEX: "true", CBM_LOG_LEVEL: "warn" },
-      };
-      results.push({ name: "codebase-memory", status: "integrated", detail: binary });
-    } else results.push({ name: "codebase-memory", status: "missing", detail: binary });
-  }
 
   for (const profile of new Set([config.omp.interactiveProfile, config.omp.profile])) {
     const publicFile = path.join(ompAgentDir(profile), "mcp.json");
@@ -92,7 +77,11 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     "librarian",
     "librarian-okf",
     "camofox",
+    "codebase-memory",
   ]);
+  if (config.integrations.codebaseMemory) {
+    integrateCodebaseMemory(config, results);
+  }
   if (config.integrations.contextMode) {
     integrateContextMode(config, results);
   }
@@ -109,6 +98,32 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     integrateLibrarian(config, results);
   }
   return results;
+}
+
+function integrateCodebaseMemory(
+  config: PersephoneConfig,
+  results: IntegrationResult[],
+): void {
+  const root = path.join(config.integrations.servicesRoot, "codebase-memory-mcp");
+  const installer = path.join(root, "integrate-local.sh");
+  if (!existsSync(installer)) {
+    results.push({ name: "codebase-memory", status: "missing", detail: installer });
+    return;
+  }
+
+  const command = spawnSync("bash", [installer, "--target", "omp"], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    env: childEnvironment(),
+  });
+  results.push({
+    name: "codebase-memory",
+    status: command.status === 0 ? "integrated" : "failed",
+    detail: command.status === 0
+      ? `Applied ${installer} --target omp`
+      : cleanOutput(command),
+  });
 }
 
 function integrateContextMode(
