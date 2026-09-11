@@ -20,7 +20,7 @@ This matrix is the implementation answer to the original OMP migration analysis.
 |Remote approvals|Persephone + OMP RPC UI|Implemented, route-bound and expiring|
 |Durable cron|Persephone|Implemented, five-field local-time cron|
 |Health/control endpoint|Persephone|Implemented, loopback by default|
-|Large external corpus containment|Context Mode|Native OMP plugin hooks plus its bundled stdio MCP launched with Bun|
+|Large external corpus containment|Context Mode|Its checked-in integration contract installs native OMP hooks and the bundled Bun stdio MCP|
 |Archived skills/session semantic search|Retrieval|Native stdio MCP integration|
 |Code graph/wiki/coverage|Codebase Memory|Native compiled stdio MCP integration|
 |Delegated retrieval/synthesis|Librarian|Native OMP JSONL RPC backend + private profile|

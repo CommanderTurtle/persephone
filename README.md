@@ -17,7 +17,7 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 - Conversation-bound `/approve` and `/deny` replies for headless OMP UI requests.
 - Mid-turn `/steer`, queued `/follow`, `/model`, `/thinking`, `/cwd`, and `/new` controls.
 - A local authenticated health/control API.
-- Native registration of Context Mode, Librarian, Retrieval, Codebase Memory, and Camofox.
+- Delegated native registration of Context Mode, Librarian, Retrieval, and Camofox, plus direct Codebase Memory registration.
 - Localflame's complete Firecrawl MCP surface, installed through Localflame's own repeatable OMP integration script.
 - A real OMP-compatible `browser` tool backed by local Camofox rather than Puppeteer/Chromium.
 - A small OMP extension with `/persephone`, `persephone_status`, and `persephone_submit`.
@@ -91,7 +91,7 @@ Leave it disabled while Hermes owns the same Signal account. During a cutover, s
 |Project|OMP integration|
 |---|---|
 |Localflame|Its own `install.sh --target omp`; the result is the seven-tool Firecrawl stdio MCP plus its routing skill|
-|Context Mode|`omp plugin link` for lifecycle hooks plus its bundled stdio MCP launched directly with Bun|
+|Context Mode|Its own `integrate.sh --target omp`; the result is its native lifecycle plugin plus the bundled Bun stdio MCP|
 |Librarian|Public stdio MCP plus a private `librarian` OMP RPC profile whose MCP surface contains only deterministic OKF tools|
 |Retrieval|Its own `integrate.sh`; the result is its indexed stdio MCP, session-close hook, and routing skill|
 |Codebase Memory|Its compiled, zero-dependency stdio server|

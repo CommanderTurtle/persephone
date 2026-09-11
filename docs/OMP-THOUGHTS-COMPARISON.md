@@ -46,7 +46,7 @@ This is not a Firecrawl-to-browser substitution. Search and interactive browser 
 
 |System|Delivered OMP role|
 |---|---|
-|Context Mode|Linked through its native OMP plugin manifest for lifecycle hooks, with its bundled stdio MCP launched by Bun for the `ctx_*` tool surface.|
+|Context Mode|Its checked-in integration contract links the native OMP lifecycle plugin and bundled Bun stdio MCP for the `ctx_*` tool surface.|
 |Retrieval|Watcher-backed stdio MCP for archived skills and semantic/session material.|
 |Librarian|Public stdio MCP plus an isolated OMP RPC profile for delegated retrieval and synthesis.|
 |Codebase Memory|Compiled stdio MCP for project structure, graph, and wiki knowledge.|

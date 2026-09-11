@@ -4,7 +4,7 @@ import path from "node:path";
 import { configPath, envPath, readEnvFile } from "./config.ts";
 import { controlRequest } from "./control-client.ts";
 import { DiscordClient } from "./discord.ts";
-import { ompAgentDir, repoRoot } from "./paths.ts";
+import { ompAgentDir, repoRoot, stateRoot } from "./paths.ts";
 import { SlackClient } from "./slack.ts";
 import type { PersephoneConfig } from "./types.ts";
 
@@ -41,10 +41,20 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
     const installer = path.join(config.integrations.localflameRoot, "install.sh");
     results.push({ check: "integration:localflame", ok: existsSync(installer), detail: installer });
   }
+  if (config.integrations.contextMode) {
+    const installer = path.join(config.integrations.servicesRoot, "context-mode", "integrate.sh");
+    results.push({ check: "integration:context-mode", ok: existsSync(installer), detail: installer });
+  }
   if (config.integrations.camofox) {
     const installer = path.join(config.integrations.servicesRoot, "camofox-mcp", "integrate.sh");
     results.push({ check: "integration:camofox", ok: existsSync(installer), detail: installer });
   }
+  const delegatedOwnership = delegatedMcpOwnership();
+  results.push({
+    check: "integration:delegated-ownership",
+    ok: delegatedOwnership.length === 0,
+    detail: delegatedOwnership.length ? delegatedOwnership.join(", ") : "owned by each integration repository",
+  });
 
   const mcpFile = path.join(ompAgentDir(config.omp.profile), "mcp.json");
   const mcpNames = existsSync(mcpFile) ? readMcpNames(mcpFile) : [];
@@ -230,4 +240,22 @@ function expectedMcpNames(config: PersephoneConfig): string[] {
     config.integrations.codebaseMemory && "codebase-memory",
     config.integrations.camofox && "camofox",
   ].filter((value): value is string => Boolean(value));
+}
+
+function delegatedMcpOwnership(): string[] {
+  const file = path.join(stateRoot(), "integration-backup.json");
+  if (!existsSync(file)) return [];
+  const delegated = new Set(["context-mode", "retrieval", "localflame", "librarian", "librarian-okf", "camofox"]);
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as { mcp?: Record<string, Record<string, unknown>> };
+    const entries: string[] = [];
+    for (const [configFile, values] of Object.entries(parsed.mcp || {})) {
+      for (const name of Object.keys(values || {})) {
+        if (delegated.has(name)) entries.push(`${configFile}:${name}`);
+      }
+    }
+    return entries.sort();
+  } catch {
+    return [`malformed:${file}`];
+  }
 }

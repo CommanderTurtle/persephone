@@ -44,8 +44,6 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
   const results: IntegrationResult[] = [];
   const omp = resolveExecutable(config.omp.command);
   if (!omp) throw new Error(`OMP command was not found: ${config.omp.command}`);
-  const bun = Bun.which("bun");
-  if (!bun) throw new Error("Bun is required");
 
   const linked = spawnSync(omp, ["plugin", "link", repoRoot()], { encoding: "utf8", env: childEnvironment() });
   results.push({
@@ -66,26 +64,6 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
 
   const services = config.integrations.servicesRoot;
   const publicEntries: Record<string, unknown> = {};
-  if (config.integrations.contextMode) {
-    const root = path.join(services, "context-mode");
-    if (!existsSync(path.join(root, "package.json"))) {
-      results.push({ name: "context-mode", status: "missing", detail: root });
-    } else {
-      const command = spawnSync(omp, ["plugin", "link", root], { encoding: "utf8", env: childEnvironment() });
-      results.push({
-        name: "context-mode",
-        status: command.status === 0 ? "integrated" : "failed",
-        detail: command.status === 0 ? "Linked through its native omp.extensions entry" : cleanOutput(command),
-      });
-      const server = path.join(root, "server.bundle.mjs");
-      if (existsSync(server)) {
-        publicEntries["context-mode"] = { type: "stdio", command: bun, args: [server], cwd: root };
-        results.push({ name: "context-mode-mcp", status: "integrated", detail: server });
-      } else {
-        results.push({ name: "context-mode-mcp", status: "missing", detail: server });
-      }
-    }
-  }
 
   if (config.integrations.codebaseMemory) {
     const root = path.join(services, "codebase-memory-mcp");
@@ -107,6 +85,17 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     mergeMcp(publicFile, publicEntries);
     results.push({ name: `omp-mcp:${profile}`, status: "integrated", detail: publicFile });
   }
+  releaseDelegatedMcpOwnership([
+    "context-mode",
+    "retrieval",
+    "localflame",
+    "librarian",
+    "librarian-okf",
+    "camofox",
+  ]);
+  if (config.integrations.contextMode) {
+    integrateContextMode(config, results);
+  }
   if (config.integrations.camofox) {
     integrateCamofox(config, results);
   }
@@ -120,6 +109,32 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     integrateLibrarian(config, results);
   }
   return results;
+}
+
+function integrateContextMode(
+  config: PersephoneConfig,
+  results: IntegrationResult[],
+): void {
+  const root = path.join(config.integrations.servicesRoot, "context-mode");
+  const installer = path.join(root, "integrate.sh");
+  if (!existsSync(installer)) {
+    results.push({ name: "context-mode", status: "missing", detail: installer });
+    return;
+  }
+
+  const command = spawnSync("bash", [installer, "--target", "omp"], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    env: childEnvironment(),
+  });
+  results.push({
+    name: "context-mode",
+    status: command.status === 0 ? "integrated" : "failed",
+    detail: command.status === 0
+      ? `Applied ${installer} --target omp`
+      : cleanOutput(command),
+  });
 }
 
 function integrateCamofox(
@@ -464,6 +479,21 @@ function rememberMcp(file: string, names: string[]): void {
     backup.mcp[file]![name] = Object.hasOwn(servers, name) ? servers[name] : MISSING;
   }
   writeJsonAtomic(backupPath(), backup);
+}
+
+function releaseDelegatedMcpOwnership(names: string[]): void {
+  const file = backupPath();
+  if (!existsSync(file)) return;
+  const backup = loadBackup();
+  let changed = false;
+  for (const values of Object.values(backup.mcp)) {
+    for (const name of names) {
+      if (!Object.hasOwn(values, name)) continue;
+      delete values[name];
+      changed = true;
+    }
+  }
+  if (changed) writeJsonAtomic(file, backup);
 }
 
 function loadBackup(): IntegrationBackup {

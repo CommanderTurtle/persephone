@@ -414,7 +414,7 @@ persephone doctor
 
 ### Existing integrations to tighten
 
-1. Keep the Context Mode lifecycle plugin and bundled MCP together; Persephone now launches the MCP directly with Bun and verifies its runtime tool count.
+1. Keep the Context Mode lifecycle plugin and bundled MCP together; Persephone delegates installation to Context Mode's checked-in integration contract and verifies the resulting plugin and MCP registrations.
 2. Confirm or configure Zed's ACP MCP payload, then document exactly how Retrieval, Librarian, Codebase Memory, and Camofox are passed.
 3. Ensure the Retrieval MCP exposes one compact, stable skill-search contract suitable for a visible core lookup skill.
 4. Keep the Librarian private profile isolated and deterministic.

@@ -26,7 +26,7 @@ A Signal group or shared Discord/Slack channel is one shared route. Any permitte
 
 ## Trusted-code boundary
 
-OMP extensions are in-process code with the user's permissions. Persephone therefore must be treated like OMP itself, not like a sandboxed MCP. `omp plugin link` is invoked only on the current reviewed repository and the known local Context Mode repository.
+OMP extensions are in-process code with the user's permissions. Persephone therefore must be treated like OMP itself, not like a sandboxed MCP. Persephone links its reviewed repository; Context Mode's reviewed integration contract owns its separate native plugin link.
 
 MCP servers remain separate child processes. Persephone writes only named entries into OMP's existing MCP JSON and refuses malformed source configuration.
 
