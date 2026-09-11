@@ -230,6 +230,12 @@ history through a read-only helper inside the container. State changes use a
 typed JSON envelope through `workspace mutate`; Diogenes plans and confirms
 that envelope before invoking it.
 
+The typed `review.open` action accepts an existing absolute host Git worktree
+(or a `~/...` path) and an optional positive pull-request number. Persephone
+validates the worktree, fetches that PR through the fixed `git-agent review`
+path, and hands the host clone to Orca or GitCito without checking out or
+modifying RoboOMP's isolated issue worktree.
+
 `git-agent update` resolves the installed host OMP version to its signed source
 tag, atomically updates the private version/commit pair, validates the complete
 configuration, rebuilds, and replaces the running containers. It is deliberate

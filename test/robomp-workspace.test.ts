@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -108,6 +109,60 @@ describe("RoboOMP owner workspace contract", () => {
     expect(JSON.stringify(snapshot)).not.toContain("hidden-token");
     const secrets = snapshot.secrets as Array<{ name: string; configured: boolean }>;
     expect(secrets.find((entry) => entry.name === "ROBOMP_REPLAY_TOKEN")?.configured).toBe(true);
+    const capabilities = snapshot.capabilities as { actions: string[] };
+    expect(capabilities.actions).toContain("review.open");
+  });
+
+  test("hands an existing host worktree to the fixed review command", async () => {
+    const paths = fixture();
+    const repository = mkdtempSync(path.join(os.tmpdir(), "persephone-review-repository-"));
+    directories.push(repository);
+    expect(spawnSync("git", ["init", "--quiet", repository]).status).toBe(0);
+    const invocation = path.join(paths.root, "review-invocation.txt");
+    writeFileSync(
+      paths.script,
+      `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(invocation)}\nprintf 'review ready\\n'\n`,
+      { mode: 0o755 },
+    );
+
+    const result = await applyRobompMutation({
+      version: 1,
+      action: "review.open",
+      repositoryPath: repository,
+      pullRequest: 27,
+    }, paths);
+
+    expect(result).toMatchObject({
+      action: "review.open",
+      changed: true,
+      restartRequired: false,
+      repositoryPath: repository,
+      pullRequest: 27,
+      output: "review ready",
+    });
+    expect(readFileSync(invocation, "utf8").trim().split("\n")).toEqual([
+      "review",
+      repository,
+      "27",
+    ]);
+  });
+
+  test("rejects review handoff for a non-worktree or invalid pull request", async () => {
+    const paths = fixture();
+    await expect(applyRobompMutation({
+      version: 1,
+      action: "review.open",
+      repositoryPath: paths.root,
+    }, paths)).rejects.toThrow("not a Git worktree");
+    const repository = mkdtempSync(path.join(os.tmpdir(), "persephone-review-invalid-"));
+    directories.push(repository);
+    expect(spawnSync("git", ["init", "--quiet", repository]).status).toBe(0);
+    await expect(applyRobompMutation({
+      version: 1,
+      action: "review.open",
+      repositoryPath: repository,
+      pullRequest: 0,
+    }, paths)).rejects.toThrow("positive integer");
   });
 
   test("renderer quotes values that cannot safely remain bare", () => {

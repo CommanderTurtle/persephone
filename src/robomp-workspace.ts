@@ -241,6 +241,7 @@ export async function robompWorkspaceSnapshot(
         "timer.enable",
         "timer.disable",
         "version.sync",
+        "review.open",
       ],
     },
   };
@@ -284,6 +285,21 @@ export async function applyRobompMutation(value: unknown, paths = robompPaths())
     const requested = payload.ompVersion === undefined ? undefined : requiredVersion(payload.ompVersion);
     const pin = syncVersion(paths, requested);
     return mutationResult(action, pin.changed, pin.changed, { version: pin.version, commit: pin.commit });
+  }
+
+  if (action === "review.open") {
+    const repositoryPath = requiredHostRepositoryPath(payload.repositoryPath);
+    const pullRequest = optionalPullRequest(payload.pullRequest);
+    const output = runOwnerScript(
+      paths,
+      ["review", repositoryPath, ...(pullRequest === null ? [] : [String(pullRequest)])],
+      120_000,
+    );
+    return mutationResult(action, true, false, {
+      repositoryPath,
+      pullRequest,
+      output,
+    });
   }
 
   if (action === "trigger.triage") {
@@ -410,9 +426,10 @@ function composeCommand(paths: RobompPaths, args: string[], timeout: number): Co
   ], paths.root, timeout);
 }
 
-function runOwnerScript(paths: RobompPaths, args: string[], timeout: number): void {
+function runOwnerScript(paths: RobompPaths, args: string[], timeout: number): string {
   const result = command(paths.script, args, paths.root, timeout);
   if (!result.ok) throw new Error(result.stderr || `${args[0] || "RoboOMP action"} failed`);
+  return result.stdout;
 }
 
 function command(executable: string, args: string[], cwd: string, timeout: number): CommandResult {
@@ -545,6 +562,26 @@ function requiredRepository(value: unknown): string {
   const repository = requiredString(value, "repository", 400);
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error("repository must be owner/name");
   return repository;
+}
+
+function requiredHostRepositoryPath(value: unknown): string {
+  const source = requiredString(value, "repositoryPath", 4_000);
+  const home = process.env.HOME || "";
+  const expanded = source === "~" ? home : source.startsWith("~/") ? path.join(home, source.slice(2)) : source;
+  if (!path.isAbsolute(expanded)) throw new Error("repositoryPath must be absolute or start with ~/");
+  const resolved = path.resolve(expanded);
+  const result = command("git", ["-C", resolved, "rev-parse", "--show-toplevel"], process.cwd(), 10_000);
+  if (!result.ok || !result.stdout) throw new Error(`repositoryPath is not a Git worktree: ${resolved}`);
+  return path.resolve(result.stdout);
+}
+
+function optionalPullRequest(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const number = typeof value === "string" && /^[1-9][0-9]*$/.test(value) ? Number(value) : value;
+  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 1) {
+    throw new Error("pullRequest must be a positive integer");
+  }
+  return number;
 }
 
 function boundedInteger(value: number, field: string, min: number, max: number): number {
