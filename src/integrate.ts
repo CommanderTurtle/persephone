@@ -88,15 +88,6 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     }
   }
 
-  if (config.integrations.retrieval) {
-    const root = path.join(services, "retrieval");
-    const start = path.join(root, "start.sh");
-    if (existsSync(start)) {
-      publicEntries.retrieval = { type: "stdio", command: start, cwd: root };
-      results.push({ name: "retrieval", status: "integrated", detail: start });
-    } else results.push({ name: "retrieval", status: "missing", detail: start });
-  }
-
   if (config.integrations.codebaseMemory) {
     const root = path.join(services, "codebase-memory-mcp");
     const binary = path.join(root, "build", "c", "codebase-memory-mcp");
@@ -133,10 +124,39 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     mergeMcp(publicFile, publicEntries);
     results.push({ name: `omp-mcp:${profile}`, status: "integrated", detail: publicFile });
   }
+  if (config.integrations.retrieval) {
+    integrateRetrieval(config, results);
+  }
   if (config.integrations.localflame) {
     integrateLocalflame(config, results);
   }
   return results;
+}
+
+function integrateRetrieval(
+  config: PersephoneConfig,
+  results: IntegrationResult[],
+): void {
+  const root = path.join(config.integrations.servicesRoot, "retrieval");
+  const installer = path.join(root, "integrate.sh");
+  if (!existsSync(installer)) {
+    results.push({ name: "retrieval", status: "missing", detail: installer });
+    return;
+  }
+
+  const command = spawnSync("bash", [installer], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    env: childEnvironment(),
+  });
+  results.push({
+    name: "retrieval",
+    status: command.status === 0 ? "integrated" : "failed",
+    detail: command.status === 0
+      ? `Applied ${installer}`
+      : cleanOutput(command),
+  });
 }
 
 function integrateLocalflame(
@@ -376,10 +396,7 @@ function resolveLocalModelRoles(
 }
 
 function activeSkillDirectories(config: PersephoneConfig, includeOperations: boolean): string[] {
-  const directories = [
-    path.join(config.integrations.servicesRoot, "retrieval", "skills"),
-    ...(includeOperations ? [path.join(repoRoot(), "skills")] : []),
-  ];
+  const directories = includeOperations ? [path.join(repoRoot(), "skills")] : [];
   return directories.filter((directory) => existsSync(directory));
 }
 
