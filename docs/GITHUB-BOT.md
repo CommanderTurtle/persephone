@@ -86,6 +86,18 @@ ROBOMP_MODEL=<OMP model alias from models.container.yml>
 never replaces an existing configuration. The source pair is pinned: the build
 fails when `OMP_COMMIT` does not contain the declared `OMP_VERSION`.
 
+After upgrading the host OMP CLI, adopt its matching source tag deliberately:
+
+```bash
+persephone git-agent update
+# or select a reviewed version explicitly
+persephone git-agent update 18.1.16
+```
+
+The update command changes only `OMP_VERSION` and `OMP_COMMIT`, then runs the
+normal doctor, build, and `up` sequence. It can be repeated safely, but it is
+not run implicitly because a container replacement can interrupt active work.
+
 The default submitter limits are zero. Repository owners, members,
 collaborators, configured maintainers, and explicitly unlimited logins retain
 native authorization; arbitrary public issue authors cannot spend model time.
@@ -114,6 +126,33 @@ The container model file is the existing
 `~/.omp/agent/models.container.yml`; on this workstation it points at the host
 vLLM endpoint through `llm-gateway.internal`. The container does not copy OMP
 credentials, sessions, or the host's normal agent database.
+
+## Diogenes owner workspace
+
+The owner-facing read model is available without copying RoboOMP internals into
+Diogenes:
+
+```bash
+persephone git-agent workspace show --limit 50 --state open
+persephone git-agent workspace inspect CommanderTurtle/repository#123 --limit 50
+persephone git-agent workspace mutate /path/to/confirmed.json --consume
+```
+
+`show` emits `persephone.robomp.workspace.v1`. Secret fields are represented by
+configured/not-configured booleans; their values remain in the mode-0600 owner
+environment. The response keeps native status, issue browse, event, release,
+and log payloads distinct so the UI can render them without guessing.
+
+`inspect` emits `robomp.issue.workspace.v1` from a read-only in-container
+helper. It includes bounded Git status, branches, commits, changed files,
+unified diffs, issue/event records, redacted tool calls, review comments, and
+file metadata for the OMP session, context, and artifacts. It never contacts
+GitHub and never writes to the issue worktree.
+
+The typed mutation actions are `configuration.patch`, `trigger.triage`,
+`trigger.retry`, `trigger.cancel`, `issue.cleanup`, `audit.dream`,
+`timer.enable`, `timer.disable`, and `version.sync`. Remote actions reuse
+RoboOMP's replay-token API, while secret configuration values are write-only.
 
 ## Native workflows
 

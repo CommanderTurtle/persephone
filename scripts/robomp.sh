@@ -94,6 +94,13 @@ case "$command" in
   doctor)
     doctor
     ;;
+  update)
+    require_command bun
+    bun "$root/src/robomp-workspace.ts" sync-version "${1:-}"
+    doctor
+    compose build --pull
+    compose up -d --remove-orphans
+    ;;
   build)
     doctor
     compose build --pull
@@ -121,6 +128,10 @@ case "$command" in
     port="$(env_value ROBOMP_PUBLIC_PORT)"
     curl -fsS "http://127.0.0.1:${port:-6543}/healthz"
     printf '\n'
+    ;;
+  workspace)
+    require_command bun
+    bun "$root/src/robomp-workspace.ts" "$@"
     ;;
   triage)
     [ "$#" -eq 1 ] || die "usage: persephone git-agent triage owner/repo#123"
@@ -244,9 +255,13 @@ Persephone native Git agent (RoboOMP)
 
   persephone git-agent init
   persephone git-agent doctor
+  persephone git-agent update [OMP_VERSION]
   persephone git-agent build | up | down | restart
   persephone git-agent logs [robomp|gh-proxy]
   persephone git-agent status
+  persephone git-agent workspace show [--limit N] [--state open|closed|all]
+  persephone git-agent workspace inspect owner/repo#123 [--limit N]
+  persephone git-agent workspace mutate FILE.json [--consume]
   persephone git-agent triage owner/repo#123
   persephone git-agent cleanup owner/repo#123
   persephone git-agent dream owner/repo [bounded focus]

@@ -212,11 +212,29 @@ OMP already ships `python/robomp`, a purpose-built GitHub issue/PR orchestrator 
 ```bash
 persephone git-agent init
 persephone git-agent doctor
+persephone git-agent update
 persephone git-agent build
 persephone git-agent up
+persephone git-agent workspace show
+persephone git-agent workspace inspect CommanderTurtle/repository#123
 persephone git-agent triage CommanderTurtle/repository#123
 persephone git-agent review ~/Hermes/repository 123
 ```
+
+`workspace show` is the versioned, redacted owner contract used by Diogenes. It
+combines native RoboOMP status, events, issues, releases, logs, repository
+browse data, container state, and the writable configuration schema without
+returning token values. `workspace inspect` reads one isolated issue worktree,
+its Git history/diff, OMP session metadata, artifacts, and bounded tool-call
+history through a read-only helper inside the container. State changes use a
+typed JSON envelope through `workspace mutate`; Diogenes plans and confirms
+that envelope before invoking it.
+
+`git-agent update` resolves the installed host OMP version to its signed source
+tag, atomically updates the private version/commit pair, validates the complete
+configuration, rebuilds, and replaces the running containers. It is deliberate
+because rebuilding can interrupt active issue work. `build` never changes the
+pin on its own.
 
 The optional audit loop creates one proposal-only issue through the credential proxy, then hands it to native manual triage. Implementation still requires a trusted maintainer directive:
 
