@@ -69,6 +69,16 @@ Orca host clone ─ fetch PR branch ─ human diff/review/approval
 - RoboOMP gh-proxy: the GitHub token and all authenticated GitHub transport;
 - Orca: optional host-side graph, worktree, and diff review.
 
+### Browser control
+
+Diogenes consumes Persephone through `persephone workspace show`, the
+authenticated loopback read routes, and a confirmed
+`persephone workspace mutate FILE.json` job. The web process does not query the
+SQLite database or parse the secret file. Mutation files contain one versioned
+action, are mode `0600`, and are accepted only by the owner CLI's fixed action
+dispatcher. Connector setup, schedules, route resets, queue retries, and prompt
+dispatch therefore use the same validation as the native service.
+
 ## Web ownership
 
 Localflame owns Firecrawl transport as a standalone stdio MCP and is integrated through its checked-in OMP installer. Persephone does not implement or override `web_search`; it supplies the configured local endpoint to Localflame's installer and leaves OMP's other provider choices intact. Firecrawl owns search orchestration and its SearXNG container remains an internal backend.

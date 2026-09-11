@@ -4,6 +4,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import os from "node:os";
 import path from "node:path";
 import { ensureConfig, loadConfig } from "./config.ts";
+import { controlRequest } from "./control-client.ts";
 import { validateCron } from "./cron.ts";
 import { PersephoneDaemon } from "./daemon.ts";
 import { PersephoneDatabase } from "./database.ts";
@@ -11,6 +12,7 @@ import { doctor } from "./doctor.ts";
 import { integrate, restoreIntegrations } from "./integrate.ts";
 import { repoRoot, stateRoot } from "./paths.ts";
 import { installService, removeService, serviceAction, servicePath } from "./service.ts";
+import { applyWorkspaceMutation, readWorkspaceMutation, workspaceSnapshot } from "./workspace.ts";
 
 const [command = "help", ...args] = process.argv.slice(2);
 
@@ -51,6 +53,9 @@ try {
       break;
     case "route":
       route(args);
+      break;
+    case "workspace":
+      await workspace(args);
       break;
     case "git-agent":
       runGitAgent(args);
@@ -151,6 +156,55 @@ function route(args: string[]): void {
   const db = new PersephoneDatabase();
   try {
     console.log(JSON.stringify(db.listRoutes(), null, 2));
+  } finally {
+    db.close();
+  }
+}
+
+async function workspace(args: string[]): Promise<void> {
+  const [action = "show", ...rest] = args;
+  const config = loadConfig();
+  const db = new PersephoneDatabase(undefined, { recover: false });
+  try {
+    if (action === "show") {
+      const limitText = option(rest, "--limit") || "50";
+      const limit = Number(limitText);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error("--limit must be an integer from 1 to 200");
+      let runtime: Record<string, unknown> | null = null;
+      try {
+        runtime = await controlRequest<Record<string, unknown>>(config, "/v1/status", {
+          signal: AbortSignal.timeout(1500),
+        });
+      } catch {
+        runtime = { ok: false, reachable: false };
+      }
+      console.log(JSON.stringify(workspaceSnapshot(config, db, runtime, limit), null, 2));
+      return;
+    }
+    if (action === "queue") {
+      const [kind, rawId] = rest;
+      if ((kind !== "inbox" && kind !== "outbox") || !rawId || !Number.isSafeInteger(Number(rawId)) || Number(rawId) < 1) {
+        throw new Error("Usage: persephone workspace queue inbox|outbox ID");
+      }
+      const record = db.getQueueRecord(kind, Number(rawId));
+      if (!record) throw new Error(`${kind} record ${rawId} was not found`);
+      console.log(JSON.stringify(record, null, 2));
+      return;
+    }
+    if (action === "mutate") {
+      const consume = rest.includes("--consume");
+      const files = rest.filter((value) => value !== "--consume");
+      if (files.length !== 1 || !files[0]) throw new Error("Usage: persephone workspace mutate FILE.json [--consume]");
+      const file = path.resolve(files[0]);
+      try {
+        const result = applyWorkspaceMutation(readWorkspaceMutation(file), config, db);
+        console.log(JSON.stringify(result, null, 2));
+      } finally {
+        if (consume) rmSync(file, { force: true });
+      }
+      return;
+    }
+    throw new Error("Usage: persephone workspace show [--limit N] | queue inbox|outbox ID | mutate FILE.json");
   } finally {
     db.close();
   }
@@ -280,6 +334,9 @@ function help(): void {
   persephone schedule add NAME "CRON" "PROMPT" [--to CHANNEL:PEER]
   persephone schedule remove NAME
   persephone route list
+  persephone workspace show [--limit N]
+  persephone workspace queue inbox|outbox ID
+  persephone workspace mutate FILE.json [--consume]
   persephone git-agent help
   persephone zed [DIRECTORY]
   persephone update | uninstall

@@ -8,9 +8,13 @@ export interface OutboxRecord {
   id: number;
   channel: string;
   peerId: string;
+  inboxId: number | null;
   body: string;
+  createdAt: number;
+  sentAt: number | null;
   status: string;
   attempts: number;
+  error: string | null;
 }
 
 export interface ApprovalRecord {
@@ -23,20 +27,48 @@ export interface ApprovalRecord {
   title: string;
   message: string;
   status: string;
+  createdAt: number;
   expiresAt: number;
+}
+
+export interface WorkerStateRecord {
+  workerKey: string;
+  sessionPath: string | null;
+  pid: number | null;
+  profile: string;
+  cwd: string;
+  status: string;
+  lastSeen: number;
+}
+
+export interface QueueRecord {
+  kind: "inbox" | "outbox";
+  id: number;
+  channel: string;
+  peerId: string;
+  messageId: string | null;
+  inboxId: number | null;
+  body: string;
+  bodyLength: number;
+  bodyTruncated: boolean;
+  createdAt: number;
+  sentAt: number | null;
+  status: string;
+  attempts: number;
+  error: string | null;
 }
 
 export class PersephoneDatabase {
   readonly db: Database;
 
-  constructor(file = databasePath()) {
+  constructor(file = databasePath(), options: { recover?: boolean } = {}) {
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     this.db = new Database(file, { create: true, strict: true });
     this.db.run("PRAGMA journal_mode=WAL");
     this.db.run("PRAGMA foreign_keys=ON");
     this.db.run("PRAGMA busy_timeout=5000");
     this.migrate();
-    this.recoverInterruptedWork();
+    if (options.recover !== false) this.recoverInterruptedWork();
   }
 
   close(): void {
@@ -153,6 +185,10 @@ export class PersephoneDatabase {
     return (this.db.query("SELECT * FROM routes ORDER BY channel, peer_id").all() as Record<string, unknown>[]).map(mapRoute);
   }
 
+  removeRoute(channel: string, peerId: string): boolean {
+    return this.db.query("DELETE FROM routes WHERE channel=? AND peer_id=?").run(channel, peerId).changes > 0;
+  }
+
   upsertRoute(route: Omit<RouteRecord, "createdAt" | "updatedAt">): RouteRecord {
     const now = Date.now();
     this.db
@@ -228,7 +264,7 @@ export class PersephoneDatabase {
   claimOutbox(limit = 16): OutboxRecord[] {
     const transaction = this.db.transaction(() => {
       const rows = this.db
-        .query("SELECT id, channel, peer_id, body, status, attempts FROM outbox WHERE status='pending' ORDER BY created_at, id LIMIT ?")
+        .query("SELECT id, channel, peer_id, inbox_id, body, created_at, sent_at, status, attempts, error FROM outbox WHERE status='pending' ORDER BY created_at, id LIMIT ?")
         .all(limit) as Record<string, unknown>[];
       const update = this.db.query("UPDATE outbox SET status='sending', attempts=attempts+1 WHERE id=? AND status='pending'");
       const claimed: OutboxRecord[] = [];
@@ -238,9 +274,13 @@ export class PersephoneDatabase {
           id: Number(row.id),
           channel: String(row.channel),
           peerId: String(row.peer_id),
+          inboxId: row.inbox_id === null ? null : Number(row.inbox_id),
           body: String(row.body),
+          createdAt: Number(row.created_at),
+          sentAt: row.sent_at === null ? null : Number(row.sent_at),
           status: "sending",
           attempts: Number(row.attempts) + 1,
+          error: row.error ? String(row.error) : null,
         });
       }
       return claimed;
@@ -256,6 +296,10 @@ export class PersephoneDatabase {
 
   listSchedules(): ScheduleRecord[] {
     return (this.db.query("SELECT * FROM schedules ORDER BY name").all() as Record<string, unknown>[]).map(mapSchedule);
+  }
+
+  setScheduleEnabled(name: string, enabled: boolean): boolean {
+    return this.db.query("UPDATE schedules SET enabled=? WHERE name=?").run(enabled ? 1 : 0, name).changes > 0;
   }
 
   putSchedule(input: Omit<ScheduleRecord, "id" | "lastMinute" | "lastStatus" | "lastError">): ScheduleRecord {
@@ -294,7 +338,7 @@ export class PersephoneDatabase {
     );
   }
 
-  createApproval(input: Omit<ApprovalRecord, "id" | "status">): ApprovalRecord {
+  createApproval(input: Omit<ApprovalRecord, "id" | "status" | "createdAt">): ApprovalRecord {
     const now = Date.now();
     const result = this.db
       .query(`
@@ -302,7 +346,7 @@ export class PersephoneDatabase {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(input.workerKey, input.requestId, input.channel, input.peerId, input.method, input.title, input.message, now, input.expiresAt);
-    return { ...input, id: Number(result.lastInsertRowid), status: "pending" };
+    return { ...input, id: Number(result.lastInsertRowid), status: "pending", createdAt: now };
   }
 
   resolveApproval(id: number, response: object, status: "approved" | "denied"): ApprovalRecord | null {
@@ -325,6 +369,14 @@ export class PersephoneDatabase {
     return row ? mapApproval(row) : null;
   }
 
+  listApprovals(limit = 50): ApprovalRecord[] {
+    return (
+      this.db
+        .query("SELECT * FROM approvals ORDER BY created_at DESC, id DESC LIMIT ?")
+        .all(normalizeLimit(limit)) as Record<string, unknown>[]
+    ).map(mapApproval);
+  }
+
   updateWorker(key: string, sessionPath: string | null, pid: number | null, profile: string, cwd: string, status: string): void {
     this.db
       .query(`
@@ -340,6 +392,55 @@ export class PersephoneDatabase {
     this.db
       .query("UPDATE worker_state SET status='stopped', pid=NULL, last_seen=? WHERE worker_key=?")
       .run(Date.now(), key);
+  }
+
+  listWorkers(limit = 50): WorkerStateRecord[] {
+    return (
+      this.db
+        .query("SELECT * FROM worker_state ORDER BY last_seen DESC, worker_key LIMIT ?")
+        .all(normalizeLimit(limit)) as Record<string, unknown>[]
+    ).map(mapWorkerState);
+  }
+
+  listQueue(kind: "inbox" | "outbox", limit = 50, maxBody = 4000): QueueRecord[] {
+    const boundedLimit = normalizeLimit(limit);
+    const boundedBody = Math.max(128, Math.min(Math.trunc(maxBody), 64_000));
+    if (kind === "inbox") {
+      const rows = this.db
+        .query(`
+          SELECT id, channel, peer_id, message_id, substr(body, 1, ?) AS body,
+            length(body) AS body_length, received_at, status, attempts, error
+          FROM inbox ORDER BY received_at DESC, id DESC LIMIT ?
+        `)
+        .all(boundedBody, boundedLimit) as Record<string, unknown>[];
+      return rows.map((row) => mapQueue("inbox", row));
+    }
+    const rows = this.db
+      .query(`
+        SELECT id, channel, peer_id, inbox_id, substr(body, 1, ?) AS body,
+          length(body) AS body_length, created_at, sent_at, status, attempts, error
+        FROM outbox ORDER BY created_at DESC, id DESC LIMIT ?
+      `)
+      .all(boundedBody, boundedLimit) as Record<string, unknown>[];
+    return rows.map((row) => mapQueue("outbox", row));
+  }
+
+  getQueueRecord(kind: "inbox" | "outbox", id: number): QueueRecord | null {
+    const row = kind === "inbox"
+      ? (this.db.query("SELECT *, length(body) AS body_length FROM inbox WHERE id=?").get(id) as Record<string, unknown> | null)
+      : (this.db.query("SELECT *, length(body) AS body_length FROM outbox WHERE id=?").get(id) as Record<string, unknown> | null);
+    return row ? mapQueue(kind, row) : null;
+  }
+
+  retryQueueRecord(kind: "inbox" | "outbox", id: number): boolean {
+    if (kind === "inbox") {
+      return this.db
+        .query("UPDATE inbox SET status='pending', error=NULL WHERE id=? AND status='failed'")
+        .run(id).changes > 0;
+    }
+    return this.db
+      .query("UPDATE outbox SET status='pending', sent_at=NULL, error=NULL WHERE id=? AND status='failed'")
+      .run(id).changes > 0;
   }
 
   status(): Record<string, number> {
@@ -414,6 +515,44 @@ function mapApproval(row: Record<string, unknown>): ApprovalRecord {
     title: String(row.title),
     message: String(row.message),
     status: String(row.status),
+    createdAt: Number(row.created_at),
     expiresAt: Number(row.expires_at),
   };
+}
+
+function mapWorkerState(row: Record<string, unknown>): WorkerStateRecord {
+  return {
+    workerKey: String(row.worker_key),
+    sessionPath: row.session_path ? String(row.session_path) : null,
+    pid: row.pid === null ? null : Number(row.pid),
+    profile: String(row.profile),
+    cwd: String(row.cwd),
+    status: String(row.status),
+    lastSeen: Number(row.last_seen),
+  };
+}
+
+function mapQueue(kind: "inbox" | "outbox", row: Record<string, unknown>): QueueRecord {
+  const body = String(row.body || "");
+  const bodyLength = Number(row.body_length ?? body.length);
+  return {
+    kind,
+    id: Number(row.id),
+    channel: String(row.channel),
+    peerId: String(row.peer_id),
+    messageId: kind === "inbox" ? String(row.message_id) : null,
+    inboxId: kind === "outbox" && row.inbox_id !== null ? Number(row.inbox_id) : null,
+    body,
+    bodyLength,
+    bodyTruncated: bodyLength > body.length,
+    createdAt: Number(kind === "inbox" ? row.received_at : row.created_at),
+    sentAt: kind === "outbox" && row.sent_at !== null ? Number(row.sent_at) : null,
+    status: String(row.status),
+    attempts: Number(row.attempts),
+    error: row.error ? String(row.error) : null,
+  };
+}
+
+function normalizeLimit(value: number): number {
+  return Math.max(1, Math.min(Math.trunc(value), 200));
 }

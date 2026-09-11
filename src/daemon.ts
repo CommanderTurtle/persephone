@@ -7,6 +7,7 @@ import { SignalClient } from "./signal.ts";
 import { SlackClient } from "./slack.ts";
 import { sleep, type ChatTransport } from "./transport.ts";
 import type { InboxRecord, JsonObject, PersephoneConfig, RouteRecord, ScheduleRecord, ThinkingLevel } from "./types.ts";
+import { workspaceSnapshot } from "./workspace.ts";
 
 interface PendingApproval {
   workerKey: string;
@@ -541,6 +542,16 @@ export class PersephoneDaemon {
       return json(status, status.ok ? 200 : 503);
     }
     if (request.method === "GET" && url.pathname === "/v1/status") return json(this.status());
+    if (request.method === "GET" && url.pathname === "/v1/workspace") {
+      const limit = Number(url.searchParams.get("limit") || "50");
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200) return json({ error: "limit must be an integer from 1 to 200" }, 400);
+      return json(workspaceSnapshot(this.config, this.db, this.status(), limit));
+    }
+    const queueMatch = request.method === "GET" ? url.pathname.match(/^\/v1\/queue\/(inbox|outbox)\/(\d+)$/) : null;
+    if (queueMatch) {
+      const record = this.db.getQueueRecord(queueMatch[1] as "inbox" | "outbox", Number(queueMatch[2]));
+      return record ? json(record) : json({ error: "queue record was not found" }, 404);
+    }
     if (request.method === "GET" && url.pathname === "/v1/schedules") return json(this.db.listSchedules());
     if (request.method === "GET" && url.pathname === "/v1/routes") return json(this.db.listRoutes());
     if (request.method === "POST" && url.pathname === "/v1/prompt") {

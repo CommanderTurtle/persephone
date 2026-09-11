@@ -162,6 +162,36 @@ activity without introducing a second scheduler or child-management surface.
 
 Persephone serializes ordinary work and state-changing commands per route, while `/approve`, `/deny`, `/steer`, `/follow`, `/stop`, `/status`, and `/help` bypass that queue. This preserves arrival order without deadlocking an approval or preventing an operator from steering or stopping an active turn. Core loops are supervised with bounded restart backoff, and `/health` reports their real state rather than treating a live HTTP socket as proof that the gateway is healthy. See [Gateway audit](docs/GATEWAY-AUDIT.md) for the source-level comparison with Hermes Gateway, Pi Gateway, Orca, and native OMP.
 
+## Owner workspace contract
+
+The checked-in CLI exposes the complete, versioned data contract used by the
+Diogenes Persephone workspace:
+
+```bash
+persephone workspace show --limit 50
+persephone workspace queue inbox 12
+persephone workspace queue outbox 8
+persephone workspace mutate /path/to/confirmed-mutation.json --consume
+```
+
+`workspace show` combines the public configuration, connector readiness,
+copy-ready Signal/Discord/Slack setup steps, routes, schedules, bounded queue
+previews, approvals, and worker state. Secret rows expose only their environment
+variable name and whether a value is configured. The corresponding daemon
+routes are `GET /v1/workspace?limit=50` and
+`GET /v1/queue/{inbox|outbox}/{id}`; normal API bearer authentication still
+applies.
+
+`workspace mutate` accepts a typed JSON envelope rather than a command string.
+Its supported actions are `configuration.replace`, `schedule.put`,
+`schedule.remove`, `schedule.enable`, `route.remove`, `queue.retry`, and
+`prompt.enqueue`. Configuration and secret-environment edits are validated and
+written atomically with mode `0600`; secret values are write-only and never
+appear in command output. A changed configuration takes effect after a normal
+`persephone restart`. Diogenes persists and confirms every mutation plan before
+it invokes this owner command, then uses `--consume` so the payload is removed
+whether the owner operation succeeds or fails.
+
 ## Durable schedules
 
 ```bash

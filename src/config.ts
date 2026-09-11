@@ -92,10 +92,7 @@ export function loadEnvironment(): void {
     if (separator < 1) continue;
     const key = line.slice(0, separator).trim();
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
-    let value = line.slice(separator + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
+    const value = parseEnvValue(line.slice(separator + 1).trim());
     if (!(key in process.env)) process.env[key] = value;
   }
 }
@@ -141,6 +138,65 @@ export function saveConfig(config: PersephoneConfig): void {
   renameSync(temporary, file);
 }
 
+export interface ConfigWriteOptions {
+  configFile?: string;
+  envFile?: string;
+}
+
+/**
+ * Validate and atomically replace the public configuration together with a
+ * bounded set of secret-environment edits. Secret values are never returned.
+ */
+export function applyConfigAndSecrets(
+  config: PersephoneConfig,
+  updates: Record<string, string | null>,
+  allowedNames: ReadonlySet<string>,
+  options: ConfigWriteOptions = {},
+): { updatedSecretNames: string[]; removedSecretNames: string[] } {
+  const configFile = options.configFile ?? configPath();
+  const envFile = options.envFile ?? envPath();
+  const normalizedUpdates: Record<string, string | null> = {};
+  for (const [name, value] of Object.entries(updates)) {
+    if (!allowedNames.has(name)) throw new Error(`Secret environment name is not owned by Persephone: ${name}`);
+    validateEnvName(name, "secret environment name");
+    if (value !== null && typeof value !== "string") throw new Error(`Secret value for ${name} must be a string or null`);
+    if (typeof value === "string" && /[\r\n\0]/.test(value)) throw new Error(`Secret value for ${name} must be one line`);
+    normalizedUpdates[name] = value;
+  }
+
+  const currentEnv = readEnvFile(envFile);
+  const validationEnv: Record<string, string | undefined> = { ...process.env, ...currentEnv };
+  for (const [name, value] of Object.entries(normalizedUpdates)) {
+    if (value === null || value === "") delete validationEnv[name];
+    else validationEnv[name] = value;
+  }
+  validateConfig(config, validationEnv);
+
+  const configDirectory = path.dirname(configFile);
+  const envDirectory = path.dirname(envFile);
+  mkdirSync(configDirectory, { recursive: true, mode: 0o700 });
+  mkdirSync(envDirectory, { recursive: true, mode: 0o700 });
+  const suffix = `${process.pid}.${crypto.randomUUID()}.tmp`;
+  const configTemporary = `${configFile}.${suffix}`;
+  const envTemporary = `${envFile}.${suffix}`;
+  const originalEnv = existsSync(envFile) ? readFileSync(envFile, "utf8") : "# Local secrets for Persephone\n";
+  writeFileSync(configTemporary, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(envTemporary, renderEnvUpdates(originalEnv, normalizedUpdates), { mode: 0o600 });
+  renameSync(envTemporary, envFile);
+  renameSync(configTemporary, configFile);
+
+  return {
+    updatedSecretNames: Object.entries(normalizedUpdates)
+      .filter(([, value]) => value !== null && value !== "")
+      .map(([name]) => name)
+      .sort(),
+    removedSecretNames: Object.entries(normalizedUpdates)
+      .filter(([, value]) => value === null || value === "")
+      .map(([name]) => name)
+      .sort(),
+  };
+}
+
 export function ensureConfig(): { config: PersephoneConfig; created: boolean } {
   const file = configPath();
   if (existsSync(file)) return { config: loadConfig(), created: false };
@@ -155,7 +211,10 @@ export function ensureConfig(): { config: PersephoneConfig; created: boolean } {
   return { config, created: true };
 }
 
-function validateConfig(config: PersephoneConfig): void {
+export function validateConfig(
+  config: PersephoneConfig,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): void {
   if (config.version !== 1) throw new Error(`Unsupported config version: ${String(config.version)}`);
   if (!config.listen || typeof config.listen.host !== "string" || !config.listen.host.trim()) {
     throw new Error("listen.host must be a non-empty string");
@@ -207,7 +266,7 @@ function validateConfig(config: PersephoneConfig): void {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.signal.accountEnv)) {
       throw new Error("signal.accountEnv must name an environment variable");
     }
-    const account = process.env[config.signal.accountEnv]?.trim();
+    const account = environment[config.signal.accountEnv]?.trim();
     if (!account) throw new Error(`signal.enabled requires ${config.signal.accountEnv} in ${envPath()}`);
     if (!config.signal.allowAll && config.signal.allowedSenders.length === 0 && config.signal.allowedGroups.length === 0) {
       throw new Error("Signal is fail-closed: configure at least one allowed sender or group");
@@ -221,7 +280,7 @@ function validateConfig(config: PersephoneConfig): void {
   validateBoolean(config.discord.allowAll, "discord.allowAll");
   validateBoolean(config.discord.requireMention, "discord.requireMention");
   if (config.discord.enabled) {
-    if (!process.env[config.discord.tokenEnv]?.trim()) {
+    if (!environment[config.discord.tokenEnv]?.trim()) {
       throw new Error(`discord.enabled requires ${config.discord.tokenEnv} in ${envPath()}`);
     }
     if (!config.discord.allowAll && !hasAny(config.discord.allowedUsers, config.discord.allowedGuilds, config.discord.allowedChannels)) {
@@ -237,10 +296,10 @@ function validateConfig(config: PersephoneConfig): void {
   validateBoolean(config.slack.allowAll, "slack.allowAll");
   validateBoolean(config.slack.requireMention, "slack.requireMention");
   if (config.slack.enabled) {
-    if (!process.env[config.slack.botTokenEnv]?.trim()) {
+    if (!environment[config.slack.botTokenEnv]?.trim()) {
       throw new Error(`slack.enabled requires ${config.slack.botTokenEnv} in ${envPath()}`);
     }
-    if (!process.env[config.slack.appTokenEnv]?.trim()) {
+    if (!environment[config.slack.appTokenEnv]?.trim()) {
       throw new Error(`slack.enabled requires ${config.slack.appTokenEnv} in ${envPath()}`);
     }
     if (!config.slack.allowAll && !hasAny(config.slack.allowedUsers, config.slack.allowedTeams, config.slack.allowedChannels)) {
@@ -279,7 +338,7 @@ function validateConfig(config: PersephoneConfig): void {
     throw new Error("security.approvalTimeoutSeconds must be an integer of at least 30");
   }
   const loopback = new Set(["127.0.0.1", "::1", "localhost"]);
-  if (!loopback.has(config.listen.host) && !process.env[config.listen.tokenEnv]?.trim()) {
+  if (!loopback.has(config.listen.host) && !environment[config.listen.tokenEnv]?.trim()) {
     throw new Error(`Non-loopback listen host requires ${config.listen.tokenEnv}`);
   }
 }
@@ -322,11 +381,49 @@ export function readEnvFile(file: string): Record<string, string> {
     const separator = line.indexOf("=");
     if (separator < 1) continue;
     const key = line.slice(0, separator).trim();
-    let value = line.slice(separator + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
+    const value = parseEnvValue(line.slice(separator + 1).trim());
     result[key] = value;
   }
   return result;
+}
+
+function parseEnvValue(value: string): string {
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (typeof parsed === "string") return parsed;
+    } catch {
+      return value.slice(1, -1);
+    }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
+  return value;
+}
+
+function renderEnvUpdates(source: string, updates: Record<string, string | null>): string {
+  const pending = new Map(Object.entries(updates));
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const raw of source.split(/\r?\n/)) {
+    const match = raw.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    if (!match || !(match[1]! in updates)) {
+      output.push(raw);
+      continue;
+    }
+    const name = match[1]!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const value = pending.get(name);
+    pending.delete(name);
+    if (typeof value === "string" && value !== "") output.push(`${name}=${encodeEnvValue(value)}`);
+  }
+  for (const [name, value] of [...pending.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    if (value !== null && value !== "") output.push(`${name}=${encodeEnvValue(value)}`);
+  }
+  while (output.length > 1 && output.at(-1) === "") output.pop();
+  return `${output.join("\n")}\n`;
+}
+
+function encodeEnvValue(value: string): string {
+  return /^[A-Za-z0-9_./:@+,%=-]*$/.test(value) ? value : JSON.stringify(value);
 }
