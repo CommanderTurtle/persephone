@@ -101,23 +101,14 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     } else results.push({ name: "codebase-memory", status: "missing", detail: binary });
   }
 
-  if (config.integrations.camofox) {
-    const root = path.join(services, "camofox-mcp");
-    const entry = path.join(root, "dist", "index.js");
-    if (existsSync(entry)) {
-      const camofoxEnv: Record<string, string> = { CAMOFOX_URL: config.web.camofox.url };
-      const apiKey = process.env[config.web.camofox.apiKeyEnv]?.trim();
-      if (apiKey) camofoxEnv.CAMOFOX_API_KEY = apiKey;
-      publicEntries.camofox = { type: "stdio", command: bun, args: [entry], cwd: root, env: camofoxEnv };
-      results.push({ name: "camofox", status: "integrated", detail: entry });
-    } else results.push({ name: "camofox", status: "missing", detail: entry });
-  }
-
   for (const profile of new Set([config.omp.interactiveProfile, config.omp.profile])) {
     const publicFile = path.join(ompAgentDir(profile), "mcp.json");
     rememberMcp(publicFile, Object.keys(publicEntries));
     mergeMcp(publicFile, publicEntries);
     results.push({ name: `omp-mcp:${profile}`, status: "integrated", detail: publicFile });
+  }
+  if (config.integrations.camofox) {
+    integrateCamofox(config, results);
   }
   if (config.integrations.retrieval) {
     integrateRetrieval(config, results);
@@ -129,6 +120,37 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     integrateLibrarian(config, results);
   }
   return results;
+}
+
+function integrateCamofox(
+  config: PersephoneConfig,
+  results: IntegrationResult[],
+): void {
+  const root = path.join(config.integrations.servicesRoot, "camofox-mcp");
+  const installer = path.join(root, "integrate.sh");
+  if (!existsSync(installer)) {
+    results.push({ name: "camofox", status: "missing", detail: installer });
+    return;
+  }
+
+  const apiKey = process.env[config.web.camofox.apiKeyEnv]?.trim();
+  const command = spawnSync("bash", [installer, "--target", "omp"], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    env: {
+      ...childEnvironment(),
+      CAMOFOX_URL: config.web.camofox.url,
+      ...(apiKey ? { CAMOFOX_API_KEY: apiKey } : {}),
+    },
+  });
+  results.push({
+    name: "camofox",
+    status: command.status === 0 ? "integrated" : "failed",
+    detail: command.status === 0
+      ? `Applied ${installer} --target omp`
+      : cleanOutput(command),
+  });
 }
 
 function integrateRetrieval(

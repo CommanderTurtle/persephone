@@ -41,6 +41,10 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
     const installer = path.join(config.integrations.localflameRoot, "install.sh");
     results.push({ check: "integration:localflame", ok: existsSync(installer), detail: installer });
   }
+  if (config.integrations.camofox) {
+    const installer = path.join(config.integrations.servicesRoot, "camofox-mcp", "integrate.sh");
+    results.push({ check: "integration:camofox", ok: existsSync(installer), detail: installer });
+  }
 
   const mcpFile = path.join(ompAgentDir(config.omp.profile), "mcp.json");
   const mcpNames = existsSync(mcpFile) ? readMcpNames(mcpFile) : [];

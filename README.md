@@ -93,13 +93,13 @@ Leave it disabled while Hermes owns the same Signal account. During a cutover, s
 |Localflame|Its own `install.sh --target omp`; the result is the seven-tool Firecrawl stdio MCP plus its routing skill|
 |Context Mode|`omp plugin link` for lifecycle hooks plus its bundled stdio MCP launched directly with Bun|
 |Librarian|Public stdio MCP plus a private `librarian` OMP RPC profile whose MCP surface contains only deterministic OKF tools|
-|Retrieval|Its watcher-backed `start.sh` stdio MCP|
+|Retrieval|Its own `integrate.sh`; the result is its indexed stdio MCP, session-close hook, and routing skill|
 |Codebase Memory|Its compiled, zero-dependency stdio server|
-|Camofox|Its built stdio MCP launched by Bun|
+|Camofox|Its own `integrate.sh --target omp`; the result is its built stdio MCP launched by Bun|
 
 ### Local web backends
 
-The default configuration expects Localflame at `~/Deepseek/localflame`, Firecrawl at `http://127.0.0.1:3002`, and Camofox at `http://127.0.0.1:9377`. `persephone integrate` calls Localflame's checked-in installer with the configured Firecrawl URL, then writes the configured Camofox URL into the OMP MCP entry. Both services may be keyless on a trusted local host; set `FIRECRAWL_API_KEY` or `CAMOFOX_API_KEY` in `~/.config/persephone/.env` when their local authentication is enabled.
+The default configuration expects Localflame at `~/Deepseek/localflame`, Firecrawl at `http://127.0.0.1:3002`, and Camofox at `http://127.0.0.1:9377`. `persephone integrate` delegates to each project's checked-in integration script with its configured service URL. Both services may be keyless on a trusted local host; set `FIRECRAWL_API_KEY` or `CAMOFOX_API_KEY` in `~/.config/persephone/.env` when their local authentication is enabled.
 
 Persephone no longer registers a second `web_search` implementation. Localflame is the single owner of the self-hosted Firecrawl transport and exposes `firecrawl_search`, `firecrawl_scrape`, `firecrawl_read`, `firecrawl_find`, `firecrawl_outline`, `firecrawl_images`, and `firecrawl_resources`. OMP's existing web providers are preserved; the small `localflame` routing skill tells agents to prefer the indexed Firecrawl path without removing other operator-configured choices. Exa remains disabled in Persephone's managed profiles because it is a hosted search service rather than software that can be installed locally.
 
@@ -116,7 +116,7 @@ Existing OMP MCP entries and config keys are preserved. Their pre-Persephone val
 
 Every built-in OMP model role is filled from the configured local default unless that role already has an explicit selector. Snapcompact remains native, while both remote-compaction switches, hosted search, automatic marketplace traffic, and model fallback are disabled. Interactive Mnemopi uses the local `smol` role for structured extraction every four user turns; durable gateway and Librarian profiles keep autonomous memory and Advisor disabled. Retrieval and Persephone expose one concise skill directory each instead of advertising the archived skill corpus.
 
-The worker profiles receive managed copies of the interactive model definitions, but not its sessions, model cache, or credential database. The isolated Librarian profile receives Retrieval, Codebase Memory, Context Mode, and Camofox tools without receiving the public Librarian MCP that would recurse into itself. Librarian's Hermes configuration is not changed; the OMP MCP receives explicit environment overrides, so both backends can coexist.
+The worker profiles receive managed copies of the interactive model definitions, but not its sessions, model cache, or credential database. The isolated Librarian profile contains only its deterministic `librarian-okf` MCP surface, preventing delegated work from recursively reaching the public Librarian or the ordinary external-tool stack. Librarian's Hermes configuration is not changed; the OMP MCP receives explicit environment overrides, so both backends can coexist.
 
 ## Messaging gateway
 
