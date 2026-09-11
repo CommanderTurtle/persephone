@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { discoverOwnedProfiles, reconcileOmp } from "./omp-reconcile.ts";
 import { ompAgentDir, repoRoot, stateRoot } from "./paths.ts";
 import type { PersephoneConfig } from "./types.ts";
 
@@ -45,30 +46,25 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
   const omp = resolveExecutable(config.omp.command);
   if (!omp) throw new Error(`OMP command was not found: ${config.omp.command}`);
 
-  const linked = spawnSync(omp, ["plugin", "link", repoRoot()], { encoding: "utf8", env: childEnvironment() });
-  results.push({
-    name: "persephone-plugin",
-    status: linked.status === 0 ? "integrated" : "failed",
-    detail: linked.status === 0 ? "Linked through omp plugin link" : cleanOutput(linked),
-  });
+  linkPersephonePlugin(omp, "default", results);
 
   const interactiveAgent = ompAgentDir(config.omp.interactiveProfile);
   const workerAgent = ompAgentDir(config.omp.profile);
   const modelRoles = resolveLocalModelRoles(omp, config.omp.interactiveProfile, config);
   configureInteractiveProfile(omp, config.omp.interactiveProfile, config, modelRoles, results);
   if (interactiveAgent !== workerAgent) {
+    releaseManagedProfileSettings(workerAgent);
     synchronizeProfileConfiguration(interactiveAgent, workerAgent);
   }
   configureWorkerProfile(omp, config.omp.profile, config, modelRoles, results);
-  refreshManagedProfileConfig(workerAgent);
 
   const publicEntries: Record<string, unknown> = {};
 
   for (const profile of new Set([config.omp.interactiveProfile, config.omp.profile])) {
     const publicFile = path.join(ompAgentDir(profile), "mcp.json");
     rememberMcp(publicFile, Object.keys(publicEntries));
-    mergeMcp(publicFile, publicEntries);
-    results.push({ name: `omp-mcp:${profile}`, status: "integrated", detail: publicFile });
+    const changed = mergeMcp(publicFile, publicEntries);
+    results.push({ name: `omp-mcp:${profile}`, status: changed ? "integrated" : "unchanged", detail: publicFile });
   }
   releaseDelegatedMcpOwnership([
     "context-mode",
@@ -97,7 +93,49 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
   if (config.integrations.librarian) {
     integrateLibrarian(config, results);
   }
+  for (const owned of discoverOwnedProfiles(config)) {
+    if (owned.profile !== "default") linkPersephonePlugin(omp, owned.profile, results);
+  }
+  results.push(...reconcileOmp(config));
+  refreshManagedProfileConfig(workerAgent);
   return results;
+}
+
+function linkPersephonePlugin(omp: string, profile: string, results: IntegrationResult[]): void {
+  const profileArgs = profile === "default" ? [] : ["--profile", profile];
+  const listed = spawnSync(omp, [...profileArgs, "plugin", "list", "--json"], {
+    encoding: "utf8",
+    env: childEnvironment(),
+  });
+  if (listed.status === 0 && pluginPointsToRepository(listed.stdout)) {
+    results.push({
+      name: `persephone-plugin:${profile}`,
+      status: "unchanged",
+      detail: "Native OMP plugin link already points to this repository",
+    });
+    return;
+  }
+  const args = profile === "default"
+    ? ["plugin", "link", repoRoot()]
+    : ["--profile", profile, "plugin", "link", repoRoot()];
+  const linked = spawnSync(omp, args, { encoding: "utf8", env: childEnvironment() });
+  results.push({
+    name: `persephone-plugin:${profile}`,
+    status: linked.status === 0 ? "integrated" : "failed",
+    detail: linked.status === 0 ? "Linked through native omp plugin link" : cleanOutput(linked),
+  });
+}
+
+function pluginPointsToRepository(value: string): boolean {
+  try {
+    const parsed = JSON.parse(value) as { npm?: Array<{ name?: unknown; path?: unknown; enabled?: unknown }> };
+    const plugin = parsed.npm?.find((entry) => entry.name === "@commanderturtle/persephone" && entry.enabled !== false);
+    return typeof plugin?.path === "string"
+      && existsSync(plugin.path)
+      && realpathSync(plugin.path) === realpathSync(repoRoot());
+  } catch {
+    return false;
+  }
 }
 
 function integrateCodebaseMemory(
@@ -352,18 +390,55 @@ function configureProfile(
   resultName: string,
 ): void {
   const failures: string[] = [];
+  let changed = 0;
   for (const [key, value] of values) {
-    const args = profile === "default"
+    const getArgs = profile === "default"
+      ? ["config", "get", key]
+      : ["--profile", profile, "config", "get", key];
+    const current = spawnSync(omp, getArgs, { encoding: "utf8", env: childEnvironment() });
+    if (current.status !== 0) {
+      failures.push(`${key}: ${cleanOutput(current)}`);
+      continue;
+    }
+    if (sameSetting(current.stdout.trim(), value)) continue;
+    const setArgs = profile === "default"
       ? ["config", "set", key, value]
       : ["--profile", profile, "config", "set", key, value];
-    const command = spawnSync(omp, args, { encoding: "utf8", env: childEnvironment() });
+    const command = spawnSync(omp, setArgs, { encoding: "utf8", env: childEnvironment() });
     if (command.status !== 0) failures.push(`${key}: ${cleanOutput(command)}`);
+    else changed += 1;
   }
   results.push({
     name: resultName,
-    status: failures.length ? "failed" : "integrated",
-    detail: failures.length ? failures.join("; ") : "Applied native OMP profile settings",
+    status: failures.length ? "failed" : changed ? "integrated" : "unchanged",
+    detail: failures.length
+      ? failures.join("; ")
+      : changed
+        ? `Applied ${changed} drifted native OMP profile setting(s)`
+        : "Native OMP profile settings already match",
   });
+}
+
+function sameSetting(current: string, desired: string): boolean {
+  return JSON.stringify(canonicalValue(parseSetting(current))) === JSON.stringify(canonicalValue(parseSetting(desired)));
+}
+
+function parseSetting(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonicalValue(entry)]),
+  );
 }
 
 function resolveLocalModelRoles(
@@ -404,13 +479,13 @@ function activeSkillDirectories(config: PersephoneConfig, includeOperations: boo
 }
 
 function refreshManagedProfileConfig(agent: string): void {
-  for (const name of ["config.yml", "config.yaml"]) {
+  for (const name of ["models.yml", "models.yaml", "models.json", "models.jsonc"]) {
     const target = path.join(agent, name);
     const marker = `${target}.managed-by-persephone`;
     if (!existsSync(target) || !existsSync(marker)) continue;
     try {
       const value = JSON.parse(readFileSync(marker, "utf8")) as Record<string, unknown>;
-      writeJsonAtomic(marker, {
+      writeJsonAtomicIfChanged(marker, {
         ...value,
         sha256: sha256(readFileSync(target)),
       });
@@ -448,7 +523,7 @@ export function restoreIntegrations(): string[] {
   return restored;
 }
 
-export function mergeMcp(file: string, entries: Record<string, unknown>): void {
+export function mergeMcp(file: string, entries: Record<string, unknown>): boolean {
   let config: McpConfig = {};
   if (existsSync(file)) {
     try {
@@ -460,12 +535,21 @@ export function mergeMcp(file: string, entries: Record<string, unknown>): void {
   config.$schema ||= MCP_SCHEMA;
   config.mcpServers = isRecord(config.mcpServers) ? config.mcpServers : {};
   for (const [name, entry] of Object.entries(entries)) config.mcpServers[name] = entry;
+  if (existsSync(file)) {
+    try {
+      const current = JSON.parse(readFileSync(file, "utf8")) as unknown;
+      if (JSON.stringify(canonicalValue(current)) === JSON.stringify(canonicalValue(config))) return false;
+    } catch {
+      // The malformed-file case was rejected above; this only guards a race.
+    }
+  }
   writeJsonAtomic(file, config);
+  return true;
 }
 
 function synchronizeProfileConfiguration(sourceAgent: string, targetAgent: string): void {
   mkdirSync(targetAgent, { recursive: true, mode: 0o700 });
-  for (const name of ["config.yml", "config.yaml", "models.yml", "models.yaml", "models.json", "models.jsonc"]) {
+  for (const name of ["models.yml", "models.yaml", "models.json", "models.jsonc"]) {
     const source = path.join(sourceAgent, name);
     const target = path.join(targetAgent, name);
     const marker = `${target}.managed-by-persephone`;
@@ -478,12 +562,25 @@ function synchronizeProfileConfiguration(sourceAgent: string, targetAgent: strin
       writeJsonAtomic(backupPath(), backup);
     }
     const content = readFileSync(source);
-    writeFileAtomic(target, content);
-    writeJsonAtomic(marker, { source, sha256: sha256(content) });
+    if (!existsSync(target) || !readFileSync(target).equals(content)) writeFileAtomic(target, content);
+    writeJsonAtomicIfChanged(marker, { source, sha256: sha256(content) });
   }
 }
 
+function releaseManagedProfileSettings(agent: string): void {
+  const released = new Set([path.join(agent, "config.yml"), path.join(agent, "config.yaml")]);
+  for (const target of released) rmSync(`${target}.managed-by-persephone`, { force: true });
+  const file = backupPath();
+  if (!existsSync(file)) return;
+  const backup = loadBackup();
+  const retained = backup.managedFiles.filter((target) => !released.has(target));
+  if (retained.length === backup.managedFiles.length) return;
+  backup.managedFiles = retained;
+  writeJsonAtomic(file, backup);
+}
+
 function rememberMcp(file: string, names: string[]): void {
+  if (names.length === 0) return;
   const backup = loadBackup();
   backup.mcp[file] ||= {};
   let current: McpConfig = {};
@@ -526,6 +623,12 @@ function backupPath(): string {
 
 function writeJsonAtomic(file: string, value: unknown): void {
   writeFileAtomic(file, Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8"));
+}
+
+function writeJsonAtomicIfChanged(file: string, value: unknown): void {
+  const content = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+  if (existsSync(file) && readFileSync(file).equals(content)) return;
+  writeFileAtomic(file, content);
 }
 
 function writeFileAtomic(file: string, value: Buffer): void {

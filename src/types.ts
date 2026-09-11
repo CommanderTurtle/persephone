@@ -14,6 +14,8 @@ export interface PersephoneConfig {
     cwd: string;
     maxWorkers: number;
     idleSeconds: number;
+    /** Exact provider/model selectors, or @role aliases, that accept direct image input. */
+    imageModels: string[];
     provider?: string;
     model?: string;
     thinking?: ThinkingLevel;

@@ -7,7 +7,7 @@ This is a source-grounded operational map of oh-my-pi (OMP), followed by a confi
 The review used two sources together:
 
 - DeepWiki's interactive Deep Research over `can1357/oh-my-pi`, last indexed at commit `403931b9` on July 27, 2026;
-- the installed OMP `17.2.7` command surface, model catalog, active configuration, MCP registry, plugin registry, and compiled source on the workstation.
+- the installed OMP command surface, model catalog, active configuration, MCP registry, plugin registry, and compiled source on the workstation, re-audited at `18.1.16` for the reconciliation pass.
 
 The live installation is newer than the DeepWiki snapshot, so live read-only inspection was used to validate defaults and exact behavior where it mattered. The primary DeepWiki references are [architecture](https://deepwiki.com/can1357/oh-my-pi/3-architecture), [system prompts](https://deepwiki.com/can1357/oh-my-pi/4.4-system-prompts), [RPC mode](https://deepwiki.com/can1357/oh-my-pi/6.5-rpc-mode), [remote and web tools](https://deepwiki.com/can1357/oh-my-pi/7.5-remote-and-web-tools), [extension system](https://deepwiki.com/can1357/oh-my-pi/11-extension-system), [MCP integration](https://deepwiki.com/can1357/oh-my-pi/12.3-mcp-integration), [async jobs](https://deepwiki.com/can1357/oh-my-pi/12.4-async-jobs-and-background-execution), [autonomous memory](https://deepwiki.com/can1357/oh-my-pi/12.5-autonomous-memory), [autoresearch](https://deepwiki.com/can1357/oh-my-pi/12.6-autoresearch), [roboomp](https://deepwiki.com/can1357/oh-my-pi/12.7-roboomp-github-triage-bot), and the [settings schema](https://deepwiki.com/can1357/oh-my-pi/13.1-settings-schema).
 
@@ -19,7 +19,7 @@ The most valuable changes are configuration, not more middleware:
 
 1. disable every Exa feature in the normal local profile;
 2. disable passive startup and marketplace update requests, and leave AutoQA off, for an explicit zero-telemetry posture;
-3. correct the dynamically discovered A1 metadata to advertise image input and keep Snapcompact enabled;
+3. correct explicitly declared multimodal model metadata to advertise image input and keep Snapcompact enabled;
 4. enable Advisor experimentally with the same local A1 endpoint, read-only tools, and a one-turn synchronization threshold;
 5. reduce task concurrency from 32 to a workstation-realistic value such as 4;
 6. keep OMP memory disabled while Retrieval remains the semantic/session owner;
@@ -133,7 +133,7 @@ Exa is a hosted neural/semantic web-search platform. Its practical differentiato
 
 OMP can use an Exa API key through its normal credential path. More importantly for privacy, ordinary Exa search also has a keyless public MCP fallback. A missing API key therefore does not prove that a query remains local. Query text, domain filters, and date filters are sent to Exa whenever that provider is selected.
 
-For this workstation, Exa adds little that justifies another outbound owner. Firecrawl already fronts local SearXNG for search, and Camofox handles interactive pages. The recommended normal-profile configuration is:
+For this workstation, Exa adds little that justifies another outbound owner. Firecrawl already fronts local SearXNG for search, and Camofox handles interactive pages. OMP `18.1.16` selects native search providers through `providers.webSearchOrder` and `providers.webSearchExclude`, so the local configuration keeps Firecrawl first and removes only Firecrawl from the exclusion list. Other entries retain their operator-selected order and exclusion state. The hosted Exa feature remains disabled:
 
 ```yaml
 exa:
@@ -233,7 +233,9 @@ providers:
           - image
 ```
 
-This belongs in `~/.omp/agent/models.yml`. It retains dynamic vLLM discovery while overriding only the incorrect capability. The resolved catalog then reports `input: ["text", "image"]`, allowing native screenshots and Snapcompact. Keep `compaction.methodOrder: [snapcompact, soft]`.
+This belongs in the profile's `models.yml`. It retains dynamic vLLM discovery while overriding only the incorrect capability. The resolved catalog then reports `input: ["text", "image"]`, allowing native image blocks and Snapcompact. The active workstation selector is now `vllm/qwen3.8-27b`; `omp.imageModels` in Persephone names the exact selectors (or `@role` aliases) that receive this narrow correction. Keep `compaction.methodOrder: [snapcompact, soft]`.
+
+OMP drops image content before transport when the resolved model metadata lacks `image`, even when the vLLM endpoint itself accepts OpenAI-compatible base64 image parts. This is why the correction belongs at the OMP catalog boundary. `images.autoResize: true` and `images.blockImages: false` retain OMP's native direct-image path; Persephone does not introduce another encoder.
 
 `provider.appendOnlyContext: auto` should remain `auto` until prefix caching is confirmed on the vLLM endpoint. If vLLM prefix caching is deliberately enabled and measured, forcing append-only context can improve cache reuse. It should not be changed merely because the context window is large.
 
@@ -345,7 +347,16 @@ features:
   unexpectedStopDetection: smart
 ```
 
-Keep the current project/profile settings, local model catalog, and MCP registry intact around this patch. Do not replace the Firecrawl extension with OMP's hosted Firecrawl provider, and do not enable OMP's built-in Chromium browser while Camofox is authoritative.
+Keep the current project/profile settings, local model catalog, and MCP registry intact around this patch. Do not replace Localflame's MCP with another Firecrawl process, and do not enable OMP's built-in Chromium browser while Camofox is configured.
+
+The durable post-update path is now:
+
+```bash
+persephone reconcile
+persephone doctor
+```
+
+The first command reads every owned value before writing. It repairs Firecrawl-first native search only on profiles that activate Localflame, disables OMP's Puppeteer browser only on profiles that activate Camofox, and patches only models listed in `omp.imageModels`. The second command checks those values plus the effective RPC tools and MCP handshakes without sending a model prompt or web request. OMP plugin links are also profile-scoped, so full `persephone integrate` links the Camofox adapter into each discovered owned profile.
 
 ### Native command sequence
 

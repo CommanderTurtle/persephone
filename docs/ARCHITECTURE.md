@@ -81,9 +81,13 @@ dispatch therefore use the same validation as the native service.
 
 ## Web ownership
 
-Localflame owns Firecrawl transport as a standalone stdio MCP and is integrated through its checked-in OMP installer. Persephone does not implement or override `web_search`; it supplies the configured local endpoint to Localflame's installer and leaves OMP's other provider choices intact. Firecrawl owns search orchestration and its SearXNG container remains an internal backend.
+Localflame owns Firecrawl transport as a standalone stdio MCP and is integrated through its checked-in OMP installer. Persephone does not implement or override `web_search`; OMP's native tool selects its Firecrawl provider first while Localflame exposes indexed search, scrape, read, find, outline, image, and resource operations. The reconciler applies that provider policy only to profiles with an active Localflame MCP entry. It removes only Firecrawl from the exclusion list and retains every unrelated provider choice. Firecrawl owns search orchestration and its SearXNG container remains an internal backend.
 
-Camofox is not a Chrome DevTools Protocol endpoint, so Persephone does not route through OMP's Puppeteer implementation. The same-name `browser` extension preserves OMP's named-tab open/run/close workflow with a bounded compatibility worker and a Camofox-backed page facade. Camofox's MCP remains registered for specialist tools that do not belong in the compatibility surface.
+Camofox is not a Chrome DevTools Protocol endpoint, so Persephone does not route through OMP's Puppeteer implementation. The same-name `browser` extension preserves OMP's named-tab open/run/close workflow with a bounded compatibility worker and a Camofox-backed page facade. Because OMP plugin registries are profile-scoped, integration links Persephone into each profile whose MCP registry activates Camofox. The adapter is essential in those profiles; Camofox's MCP remains registered for specialist tools that do not belong in the compatibility surface.
+
+OMP model discovery decides whether image blocks may be sent from each model's `input` metadata. Persephone's configuration declares the exact multimodal selectors (or role aliases) it owns. Reconciliation patches only those entries to `text` plus `image`, enables OMP's native image resize path, and verifies the effective catalog through `omp models --json`.
+
+These update-sensitive values are owned by `persephone reconcile`, not Diogenes. The command performs a read-before-write comparison and is safe to call after an OMP upgrade. `persephone doctor` separately checks configuration, resolved model metadata, active RPC tool descriptions, and MCP handshakes without issuing a model or Firecrawl request. Diogenes may invoke these commands, but it does not contain a second copy of the policy.
 
 ## Model-sequence ownership
 

@@ -10,6 +10,7 @@ import { PersephoneDaemon } from "./daemon.ts";
 import { PersephoneDatabase } from "./database.ts";
 import { doctor } from "./doctor.ts";
 import { integrate, restoreIntegrations } from "./integrate.ts";
+import { reconcileOmp } from "./omp-reconcile.ts";
 import { repoRoot, stateRoot } from "./paths.ts";
 import { installService, removeService, serviceAction, servicePath } from "./service.ts";
 import { applyWorkspaceMutation, readWorkspaceMutation, workspaceSnapshot } from "./workspace.ts";
@@ -23,6 +24,9 @@ try {
       break;
     case "integrate":
       printIntegrations(integrate(loadConfig()));
+      break;
+    case "reconcile":
+      printIntegrations(reconcileOmp(loadConfig()));
       break;
     case "serve":
       await new PersephoneDaemon(loadConfig()).run();
@@ -306,7 +310,7 @@ function runGitAgent(args: string[]): void {
   if (child.status !== 0) process.exitCode = child.status ?? 1;
 }
 
-function printIntegrations(results: ReturnType<typeof integrate>): void {
+function printIntegrations(results: Array<{ name: string; status: "integrated" | "unchanged" | "missing" | "failed"; detail: string }>): void {
   for (const result of results) console.log(`${result.status.padEnd(10)} ${result.name.padEnd(22)} ${result.detail}`);
   if (results.some((result) => result.status === "failed")) process.exitCode = 1;
 }
@@ -326,6 +330,7 @@ function help(): void {
 
   persephone init [--install-service] [--start]
   persephone integrate
+  persephone reconcile
   persephone serve
   persephone doctor | status
   persephone install-service [--start]

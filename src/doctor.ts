@@ -6,6 +6,7 @@ import { controlRequest } from "./control-client.ts";
 import { DiscordClient } from "./discord.ts";
 import { ompAgentDir, repoRoot, stateRoot } from "./paths.ts";
 import { SlackClient } from "./slack.ts";
+import { discoverOwnedProfiles, inspectOmpReconciliation } from "./omp-reconcile.ts";
 import type { PersephoneConfig } from "./types.ts";
 
 export interface CheckResult {
@@ -20,6 +21,7 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
   const bun = Bun.which("bun");
   results.push({ check: "bun", ok: Boolean(bun), detail: bun ? `${bun} (${Bun.version})` : "not found" });
   const omp = path.isAbsolute(config.omp.command) ? config.omp.command : Bun.which(config.omp.command);
+  const ownedProfiles = omp ? discoverOwnedProfiles(config) : [];
   if (omp) {
     const version = spawnSync(omp, ["--version"], { encoding: "utf8", env: { ...process.env, OTEL_SDK_DISABLED: "true" } });
     results.push({ check: "omp", ok: version.status === 0, detail: `${omp} ${`${version.stdout || version.stderr}`.trim()}`.trim() });
@@ -34,6 +36,21 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
       detail: plugins.status === 0 ? "OMP plugin registry" : `${plugins.stdout || ""}\n${plugins.stderr || ""}`.trim(),
     });
   } else results.push({ check: "omp", ok: false, detail: `${config.omp.command} was not found` });
+  if (omp) {
+    for (const owned of ownedProfiles) {
+      if (owned.profile === "default") continue;
+      const plugins = spawnSync(omp, ["--profile", owned.profile, "plugin", "list", "--json"], {
+        encoding: "utf8",
+        env: { ...process.env, OTEL_SDK_DISABLED: "true" },
+      });
+      const names = plugins.status === 0 ? readPluginNames(plugins.stdout) : [];
+      results.push({
+        check: `plugin:persephone:${owned.profile}`,
+        ok: plugins.status === 0 && names.includes("@commanderturtle/persephone"),
+        detail: plugins.status === 0 ? "profile-scoped OMP plugin registry" : `${plugins.stderr || plugins.stdout}`.trim(),
+      });
+    }
+  }
   results.push({ check: "config", ok: existsSync(configPath()), detail: configPath() });
   results.push({ check: "environment", ok: existsSync(envPath()), detail: envPath() });
   results.push({ check: "repository", ok: existsSync(path.join(repoRoot(), "package.json")), detail: repoRoot() });
@@ -59,6 +76,7 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
     ok: delegatedOwnership.length === 0,
     detail: delegatedOwnership.length ? delegatedOwnership.join(", ") : "owned by each integration repository",
   });
+  results.push(...inspectOmpReconciliation(config));
 
   const mcpFile = path.join(ompAgentDir(config.omp.profile), "mcp.json");
   const mcpNames = existsSync(mcpFile) ? readMcpNames(mcpFile) : [];
@@ -98,6 +116,21 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
   }
 
   if (includeRuntime) {
+    if (omp) {
+      for (const owned of ownedProfiles) {
+        if (owned.localflame || (owned.camofox && config.web.camofox.replaceNativeBrowser)) {
+          results.push(...probeOmpToolSurface(
+            omp,
+            owned.profile,
+            owned.localflame,
+            owned.camofox && config.web.camofox.replaceNativeBrowser,
+          ));
+        }
+        if (owned.imageModels) {
+          results.push(...probeImageModelInputs(omp, owned.profile, config.omp.imageModels));
+        }
+      }
+    }
     if (librarian?.backend === "omp" && omp) {
       results.push(probeMcp(omp, librarian.profile, "librarian-okf"));
     } else if (librarian?.backend === "hermes") {
@@ -108,6 +141,12 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
     }
     if (config.integrations.contextMode && omp) {
       results.push(probeMcp(omp, config.omp.profile, "context-mode"));
+    }
+    if (omp) {
+      for (const owned of ownedProfiles) {
+        if (owned.localflame) results.push(probeMcp(omp, owned.profile, "localflame"));
+        if (owned.camofox) results.push(probeMcp(omp, owned.profile, "camofox"));
+      }
     }
     if (config.integrations.camofox) {
       results.push(await probeHttpService(
@@ -153,6 +192,115 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
     }
   }
   return results;
+}
+
+function probeOmpToolSurface(
+  omp: string,
+  profile: string,
+  expectsLocalflame: boolean,
+  expectsCamofox: boolean,
+): CheckResult[] {
+  const input = [
+    JSON.stringify({ id: "protocol", type: "negotiate_protocol", protocolVersion: 2 }),
+    JSON.stringify({ id: "state", type: "get_state" }),
+    "",
+  ].join("\n");
+  const command = spawnSync(omp, [...profilePrefix(profile), "--mode", "rpc", "--no-session"], {
+    encoding: "utf8",
+    input,
+    timeout: 45_000,
+    maxBuffer: 16 * 1024 * 1024,
+    env: { ...process.env, OTEL_SDK_DISABLED: "true", VLLM_API_KEY: process.env.VLLM_API_KEY || "local" },
+  });
+  const state = `${command.stdout || ""}\n${command.stderr || ""}`
+    .split(/\r?\n/)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as {
+          type?: unknown;
+          command?: unknown;
+          success?: unknown;
+          data?: { dumpTools?: Array<{ name?: unknown; description?: unknown }> };
+        };
+      } catch {
+        return null;
+      }
+    })
+    .find((value) => value?.type === "response" && value.command === "get_state" && value.success === true);
+  if (!state) {
+    return [{
+      check: `omp-tools:${profile}`,
+      ok: false,
+      detail: command.error?.message || `OMP RPC exited ${command.status ?? "without a status"}`,
+    }];
+  }
+  const tools = state.data?.dumpTools || [];
+  const results: CheckResult[] = [];
+  if (expectsLocalflame) {
+    results.push({
+      check: `omp-tool:${profile}:web_search`,
+      ok: tools.some((tool) => tool.name === "web_search"),
+      detail: "native web_search with Firecrawl-first provider policy",
+    });
+  }
+  if (expectsCamofox) {
+    const browser = tools.find((tool) => tool.name === "browser");
+    results.push({
+      check: `omp-tool:${profile}:browser`,
+      ok: typeof browser?.description === "string" && /local Camofox/i.test(browser.description),
+      detail: typeof browser?.description === "string" ? firstLine(browser.description) : "browser is absent from the active tool surface",
+    });
+  }
+  return results;
+}
+
+function probeImageModelInputs(omp: string, profile: string, declared: string[]): CheckResult[] {
+  const exact = declared.filter((selector) => !selector.startsWith("@")).map(stripEffort);
+  if (exact.length === 0) return [];
+  const command = spawnSync(omp, [...profilePrefix(profile), "models", "--json"], {
+    encoding: "utf8",
+    timeout: 30_000,
+    maxBuffer: 16 * 1024 * 1024,
+    env: { ...process.env, OTEL_SDK_DISABLED: "true", VLLM_API_KEY: process.env.VLLM_API_KEY || "local" },
+  });
+  if (command.status !== 0) {
+    return [{ check: `omp-models:${profile}:runtime`, ok: false, detail: `${command.stderr || command.stdout}`.trim() }];
+  }
+  try {
+    const parsed = JSON.parse(command.stdout) as {
+      models?: Array<{ provider?: unknown; id?: unknown; input?: unknown }>;
+    };
+    return exact.map((selector) => {
+      const slash = selector.indexOf("/");
+      const provider = selector.slice(0, slash);
+      const id = selector.slice(slash + 1);
+      const model = (parsed.models || []).find((candidate) => candidate.provider === provider && candidate.id === id);
+      const input = Array.isArray(model?.input) ? model.input : [];
+      return {
+        check: `omp-model:${profile}:${selector}`,
+        ok: input.includes("image"),
+        detail: model ? `input=${JSON.stringify(input)}` : "model is absent from OMP's effective catalog",
+      };
+    });
+  } catch (error) {
+    return [{
+      check: `omp-models:${profile}:runtime`,
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error),
+    }];
+  }
+}
+
+function profilePrefix(profile: string): string[] {
+  return profile === "default" ? [] : ["--profile", profile];
+}
+
+function stripEffort(selector: string): string {
+  return selector.replace(/:(?:off|minimal|low|medium|high|xhigh|max)$/, "");
+}
+
+function firstLine(value: string): string {
+  return value.split(/\r?\n/, 1)[0] || value;
 }
 
 async function probeHttpService(

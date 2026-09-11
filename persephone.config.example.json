@@ -11,7 +11,10 @@
     "profile": "persephone",
     "cwd": "~",
     "maxWorkers": 1,
-    "idleSeconds": 1800
+    "idleSeconds": 1800,
+    "imageModels": [
+      "vllm/qwen3.8-27b"
+    ]
   },
   "signal": {
     "enabled": false,

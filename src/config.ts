@@ -15,6 +15,7 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
     cwd: "~",
     maxWorkers: 1,
     idleSeconds: 1800,
+    imageModels: ["vllm/qwen3.8-27b"],
   },
   signal: {
     enabled: false,
@@ -242,6 +243,12 @@ export function validateConfig(
   }
   if (!Number.isInteger(config.omp.idleSeconds) || config.omp.idleSeconds < 30) {
     throw new Error("omp.idleSeconds must be an integer of at least 30");
+  }
+  validateStringArray(config.omp.imageModels, "omp.imageModels");
+  for (const selector of config.omp.imageModels) {
+    if (!selector.startsWith("@") && !selector.includes("/")) {
+      throw new Error(`omp.imageModels entry must be provider/model or @role: ${selector}`);
+    }
   }
   if (config.omp.thinking && !THINKING.has(config.omp.thinking)) {
     throw new Error(`Unsupported OMP thinking level: ${config.omp.thinking}`);

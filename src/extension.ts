@@ -1,12 +1,28 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "./omp-api.ts";
 import { loadConfig } from "./config.ts";
 import { controlRequest } from "./control-client.ts";
+import { ompAgentDir } from "./paths.ts";
 import type { PersephoneConfig } from "./types.ts";
 import { CamofoxBrowserAdapter, type CamofoxBrowserParams } from "./camofox-browser.ts";
 
 export default function persephoneExtension(pi: ExtensionAPI): void {
   pi.setLabel("Persephone");
   const { z } = pi.zod;
+  let startupConfig: PersephoneConfig | null = null;
+  try {
+    startupConfig = loadConfig();
+    if (startupConfig.integrations.localflame && activeProfileHasMcp("localflame")) {
+      // OMP's native Firecrawl provider reads this at execution time. Keeping
+      // the endpoint process-local avoids a second Localflame MCP process and
+      // its separate in-memory resource index.
+      process.env.FIRECRAWL_BASE_URL = startupConfig.web.firecrawl.url;
+    }
+  } catch {
+    // Status/command calls below surface malformed Persephone configuration;
+    // vanilla OMP must still be allowed to start.
+  }
 
   pi.registerCommand("persephone", {
     description: "Inspect Persephone or submit durable prompts",
@@ -53,7 +69,7 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
     },
   });
 
-  registerBrowserTool(pi);
+  registerBrowserTool(pi, startupConfig);
 
   pi.registerTool({
     name: "persephone_submit",
@@ -93,17 +109,10 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
   });
 }
 
-function registerBrowserTool(pi: ExtensionAPI): void {
-  let config: PersephoneConfig;
-  try {
-    config = loadConfig();
-  } catch {
-    // A bad Persephone config must not prevent vanilla OMP from starting. The
-    // command and status tools surface the configuration error to the operator.
-    return;
-  }
+function registerBrowserTool(pi: ExtensionAPI, config: PersephoneConfig | null): void {
+  if (!config) return;
   const { z } = pi.zod;
-  if (config.integrations.camofox && config.web.camofox.replaceNativeBrowser) {
+  if (config.integrations.camofox && config.web.camofox.replaceNativeBrowser && activeProfileHasMcp("camofox")) {
     const camofox = new CamofoxBrowserAdapter(config);
     pi.registerTool({
       name: "browser",
@@ -133,7 +142,7 @@ function registerBrowserTool(pi: ExtensionAPI): void {
         kill: z.boolean().optional(),
       }),
       approval: "exec",
-      loadMode: "discoverable",
+      loadMode: "essential",
       strict: true,
       async execute(_toolCallId, rawParams, signal) {
         try {
@@ -154,4 +163,36 @@ function registerBrowserTool(pi: ExtensionAPI): void {
 
 function format(value: unknown): string {
   return JSON.stringify(value, null, 2);
+}
+
+function activeProfileHasMcp(name: string): boolean {
+  const explicit = process.env.PI_CODING_AGENT_DIR?.trim();
+  const profile = profileFromArgv(process.argv)
+    || process.env.OMP_PROFILE?.trim()
+    || process.env.PI_PROFILE?.trim()
+    || "default";
+  const agentDir = explicit ? path.resolve(explicit) : ompAgentDir(profile);
+  const file = path.join(agentDir, "mcp.json");
+  if (!existsSync(file)) return false;
+  try {
+    const value = JSON.parse(readFileSync(file, "utf8")) as {
+      mcpServers?: Record<string, unknown>;
+      enabledServers?: string[];
+      disabledServers?: string[];
+    };
+    if (!value.mcpServers || !Object.hasOwn(value.mcpServers, name)) return false;
+    if (value.disabledServers?.includes(name)) return false;
+    return !value.enabledServers?.length || value.enabledServers.includes(name);
+  } catch {
+    return false;
+  }
+}
+
+function profileFromArgv(argv: string[]): string | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index]!;
+    if (value === "--profile") return argv[index + 1]?.trim() || undefined;
+    if (value.startsWith("--profile=")) return value.slice("--profile=".length).trim() || undefined;
+  }
+  return undefined;
 }
