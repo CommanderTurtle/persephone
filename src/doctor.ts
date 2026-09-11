@@ -37,6 +37,10 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
   results.push({ check: "config", ok: existsSync(configPath()), detail: configPath() });
   results.push({ check: "environment", ok: existsSync(envPath()), detail: envPath() });
   results.push({ check: "repository", ok: existsSync(path.join(repoRoot(), "package.json")), detail: repoRoot() });
+  if (config.integrations.localflame) {
+    const installer = path.join(config.integrations.localflameRoot, "install.sh");
+    results.push({ check: "integration:localflame", ok: existsSync(installer), detail: installer });
+  }
 
   const mcpFile = path.join(ompAgentDir(config.omp.profile), "mcp.json");
   const mcpNames = existsSync(mcpFile) ? readMcpNames(mcpFile) : [];
@@ -68,15 +72,6 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
     }
     if (config.integrations.contextMode && omp) {
       results.push(probeMcp(omp, config.omp.profile, "context-mode"));
-    }
-    if (config.web.firecrawl.enabled) {
-      results.push(await probeHttpService(
-        "firecrawl",
-        config.web.firecrawl.url,
-        "/",
-        config.web.firecrawl.apiKeyEnv,
-        false,
-      ));
     }
     if (config.integrations.camofox) {
       results.push(await probeHttpService(
@@ -224,6 +219,7 @@ function readMcpNames(file: string): string[] {
 
 function expectedMcpNames(config: PersephoneConfig): string[] {
   return [
+    config.integrations.localflame && "localflame",
     config.integrations.contextMode && "context-mode",
     config.integrations.librarian && "librarian",
     config.integrations.retrieval && "retrieval",

@@ -2,7 +2,6 @@ import type { ExtensionAPI, ExtensionCommandContext } from "./omp-api.ts";
 import { loadConfig } from "./config.ts";
 import { controlRequest } from "./control-client.ts";
 import type { PersephoneConfig } from "./types.ts";
-import { formatFirecrawlResult, searchLocalFirecrawl, type FirecrawlSearchParams } from "./web.ts";
 import { CamofoxBrowserAdapter, type CamofoxBrowserParams } from "./camofox-browser.ts";
 
 export default function persephoneExtension(pi: ExtensionAPI): void {
@@ -54,7 +53,7 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
     },
   });
 
-  registerWebTools(pi);
+  registerBrowserTool(pi);
 
   pi.registerTool({
     name: "persephone_submit",
@@ -94,7 +93,7 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
   });
 }
 
-function registerWebTools(pi: ExtensionAPI): void {
+function registerBrowserTool(pi: ExtensionAPI): void {
   let config: PersephoneConfig;
   try {
     config = loadConfig();
@@ -104,42 +103,6 @@ function registerWebTools(pi: ExtensionAPI): void {
     return;
   }
   const { z } = pi.zod;
-  if (config.web.firecrawl.enabled) {
-    pi.registerTool({
-      name: "web_search",
-      label: "Web Search (local Firecrawl)",
-      description: "Search through the operator's self-hosted Firecrawl API and local SearXNG backend. This tool fails closed and never falls through to a hosted search provider.",
-      parameters: z.object({
-        query: z.string().min(1).describe("Search query"),
-        recency: z.enum(["day", "week", "month", "year"]).optional(),
-        limit: z.number().min(1).max(100).optional(),
-        max_tokens: z.number().optional(),
-        temperature: z.number().optional(),
-        num_search_results: z.number().min(1).max(100).optional(),
-      }),
-      approval: "read",
-      loadMode: "discoverable",
-      strict: true,
-      async execute(_toolCallId, rawParams, signal) {
-        const params = rawParams as FirecrawlSearchParams;
-        try {
-          const result = await searchLocalFirecrawl(config, params, { ...(signal ? { signal } : {}) });
-          return {
-            content: [{ type: "text", text: formatFirecrawlResult(result) }],
-            details: { response: result, backend: "self-hosted" },
-          };
-        } catch (error) {
-          if (signal?.aborted) throw error;
-          return {
-            content: [{ type: "text", text: `Local Firecrawl search failed: ${error instanceof Error ? error.message : String(error)}` }],
-            details: { provider: "firecrawl", backend: "self-hosted", fallback: false },
-            isError: true,
-          };
-        }
-      },
-    });
-  }
-
   if (config.integrations.camofox && config.web.camofox.replaceNativeBrowser) {
     const camofox = new CamofoxBrowserAdapter(config);
     pi.registerTool({

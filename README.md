@@ -18,7 +18,7 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 - Mid-turn `/steer`, queued `/follow`, `/model`, `/thinking`, `/cwd`, and `/new` controls.
 - A local authenticated health/control API.
 - Native registration of Context Mode, Librarian, Retrieval, Codebase Memory, and Camofox.
-- Local-only web search through self-hosted Firecrawl, with no hosted fallback path.
+- Localflame's complete Firecrawl MCP surface, installed through Localflame's own repeatable OMP integration script.
 - A real OMP-compatible `browser` tool backed by local Camofox rather than Puppeteer/Chromium.
 - A small OMP extension with `/persephone`, `persephone_status`, and `persephone_submit`.
 - Zed-first operation through OMP's own `omp acp` bridge.
@@ -26,7 +26,7 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 
 ## What it deliberately does not add
 
-OMP already provides editing, Hashline snapshots, LSP, plan-mode enforcement, tasks, subagents, swarm DAGs, async jobs, artifacts, compaction, ACP, model routing, MCP, skills, rules, and extension hooks. Persephone does not wrap or reimplement any of those. Its two web adapters use OMP's documented same-name tool registration: `web_search` retains OMP's request shape while transport goes to local Firecrawl, and `browser` retains OMP's open/run/close workflow while tab operations go to local Camofox.
+OMP already provides editing, Hashline snapshots, LSP, plan-mode enforcement, tasks, subagents, swarm DAGs, async jobs, artifacts, compaction, ACP, model routing, MCP, skills, rules, and extension hooks. Persephone does not wrap or reimplement any of those. Localflame owns Firecrawl search, scrape, indexed reads, outlines, images, and retained resources as one stdio MCP. Persephone retains only the `browser` compatibility adapter that maps OMP's open/run/close workflow onto local Camofox.
 
 It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, or another memory product. OMP's native Mnemopi backend remains OMP-owned; the interactive profile can use its project-scoped local SQLite memory without involving Persephone. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the platform-adapter boundary, but Hermes is not a runtime dependency. GitHub issue automation remains OMP's native `roboomp` service rather than a second, less-isolated implementation inside Persephone.
 
@@ -66,6 +66,16 @@ persephone doctor
 persephone install-service --start
 ```
 
+The same operations have zero-knowledge repository entrypoints:
+
+```bash
+./scripts/integrate.sh
+./scripts/doctor.sh              # configuration only; no service probes
+./scripts/doctor.sh --runtime    # include configured local service probes
+./scripts/restart-if-active.sh
+./scripts/update.sh
+```
+
 `persephone doctor --integration-only` is the non-service verification used by dashboard installers; it does not require the daemon or Signal to be running.
 The full `persephone doctor` additionally asks OMP itself to connect to the isolated Librarian MCP and report its tool count; it does not send a model prompt.
 
@@ -80,6 +90,7 @@ Leave it disabled while Hermes owns the same Signal account. During a cutover, s
 
 |Project|OMP integration|
 |---|---|
+|Localflame|Its own `install.sh --target omp`; the result is the seven-tool Firecrawl stdio MCP plus its routing skill|
 |Context Mode|`omp plugin link` for lifecycle hooks plus its bundled stdio MCP launched directly with Bun|
 |Librarian|Public stdio MCP plus a private `librarian` OMP RPC profile whose MCP surface contains only deterministic OKF tools|
 |Retrieval|Its watcher-backed `start.sh` stdio MCP|
@@ -88,9 +99,9 @@ Leave it disabled while Hermes owns the same Signal account. During a cutover, s
 
 ### Local web backends
 
-The default configuration expects Firecrawl at `http://127.0.0.1:3002` and Camofox at `http://127.0.0.1:9377`. `persephone integrate` writes the configured Camofox URL into the OMP MCP entry, so the MCP never relies on a hard-coded home-directory layout. Both services may be keyless on a trusted local host; set `FIRECRAWL_API_KEY` or `CAMOFOX_API_KEY` in `~/.config/persephone/.env` when their local authentication is enabled.
+The default configuration expects Localflame at `~/Deepseek/localflame`, Firecrawl at `http://127.0.0.1:3002`, and Camofox at `http://127.0.0.1:9377`. `persephone integrate` calls Localflame's checked-in installer with the configured Firecrawl URL, then writes the configured Camofox URL into the OMP MCP entry. Both services may be keyless on a trusted local host; set `FIRECRAWL_API_KEY` or `CAMOFOX_API_KEY` in `~/.config/persephone/.env` when their local authentication is enabled.
 
-OMP's built-in Firecrawl provider targets `api.firecrawl.dev` and cannot select a self-hosted base URL. Persephone therefore re-registers the same `web_search` tool through OMP's supported extension API and sends the compatible `/v2/search` request to the configured local endpoint. The behavior is fail-closed: if local Firecrawl is down, search reports that failure and never submits the query to a hosted provider. Exa remains disabled because it is a hosted search service rather than software that can be installed locally.
+Persephone no longer registers a second `web_search` implementation. Localflame is the single owner of the self-hosted Firecrawl transport and exposes `firecrawl_search`, `firecrawl_scrape`, `firecrawl_read`, `firecrawl_find`, `firecrawl_outline`, `firecrawl_images`, and `firecrawl_resources`. OMP's existing web providers are preserved; the small `localflame` routing skill tells agents to prefer the indexed Firecrawl path without removing other operator-configured choices. Exa remains disabled in Persephone's managed profiles because it is a hosted search service rather than software that can be installed locally.
 
 Integration also disables OMP's passive startup and marketplace update checks in every managed profile. Updates remain explicit operator actions; no background version request is part of the normal agent lifecycle.
 

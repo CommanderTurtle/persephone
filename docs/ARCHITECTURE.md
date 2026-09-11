@@ -15,7 +15,7 @@ Signal  Discord  Slack       cron       local API
    native OMP       native MCPs       native ACP
   tools/tasks/swarm  and plugins          Zed
         │               │
- local Firecrawl    Camofox browser + MCP
+ Localflame MCP     Camofox browser + MCP
 ```
 
 GitHub work is a separate native OMP lane:
@@ -64,13 +64,14 @@ Orca host clone ─ fetch PR branch ─ human diff/review/approval
 - Context Mode: bulk corpus/output containment;
 - Codebase Memory: code graph, coverage and architecture queries;
 - Camofox: agent browser transport.
+- Localflame: Firecrawl search, scrape, bounded resource indexing, and read tools;
 - OMP roboomp: GitHub webhook, queue, issue/PR automation, worker-slot isolation, worktrees, sessions, prompts, and audited GitHub tools;
 - RoboOMP gh-proxy: the GitHub token and all authenticated GitHub transport;
 - Orca: optional host-side graph, worktree, and diff review.
 
 ## Web ownership
 
-Persephone uses OMP's documented same-name extension registration rather than patching the harness. Its `web_search` definition preserves OMP's request schema but sends `/v2/search` to the configured self-hosted Firecrawl URL. There is no hosted fallback. In the intended workstation layout, Firecrawl owns search orchestration and its SearXNG container is merely the local search backend.
+Localflame owns Firecrawl transport as a standalone stdio MCP and is integrated through its checked-in OMP installer. Persephone does not implement or override `web_search`; it supplies the configured local endpoint to Localflame's installer and leaves OMP's other provider choices intact. Firecrawl owns search orchestration and its SearXNG container remains an internal backend.
 
 Camofox is not a Chrome DevTools Protocol endpoint, so Persephone does not route through OMP's Puppeteer implementation. The same-name `browser` extension preserves OMP's named-tab open/run/close workflow with a bounded compatibility worker and a Camofox-backed page facade. Camofox's MCP remains registered for specialist tools that do not belong in the compatibility surface.
 

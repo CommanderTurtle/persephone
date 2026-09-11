@@ -25,7 +25,7 @@ This matrix is the implementation answer to the original OMP migration analysis.
 |Code graph/wiki/coverage|Codebase Memory|Native compiled stdio MCP integration|
 |Delegated retrieval/synthesis|Librarian|Native OMP JSONL RPC backend + private profile|
 |Agent browser|Persephone + Camofox|OMP-compatible `browser` adapter plus native Camofox stdio MCP|
-|Live web search|Persephone + self-hosted Firecrawl|OMP-compatible `web_search`; local-only and fail-closed|
+|Web search, scrape, and indexed reads|Localflame + self-hosted Firecrawl|Seven-tool stdio MCP installed through Localflame's own OMP integration|
 |SearXNG|Firecrawl internal backend|Not exposed as a competing OMP provider|
 |Puppeteer/Chromium browser|OMP|Same-name tool is replaced; the Puppeteer backend is never started|
 |OMP-specific autonomous memory|OMP Mnemopi|Enabled only for the interactive profile, project-scoped and locally embedded|
@@ -51,7 +51,8 @@ This matrix is the implementation answer to the original OMP migration analysis.
 - GitHub bot: **delegated to OMP's native roboomp implementation, with a pinned deployment, health/lifecycle commands, and no duplicated worker pool or webhook path**.
 - Local model support: **left native to OMP**, with route-level provider/model selection.
 - Context Mode, Retrieval, Librarian, Codebase Memory, Camofox: **native integration implemented**.
-- Self-hosted Firecrawl search and Camofox-first browsing: **implemented through native OMP extension seams**.
+- Self-hosted Firecrawl research: **delegated to Localflame's stdio MCP**.
+- Camofox-first browsing: **implemented through OMP's native extension seam plus Camofox MCP**.
 - Zed: **native ACP path preserved**.
 - Telemetry-off local operation: **forced for Persephone/child processes**.
 - Sandwich/Bun: **Bun-only runtime; no Node executable or pnpm**.

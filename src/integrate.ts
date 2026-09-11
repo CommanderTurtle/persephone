@@ -133,7 +133,41 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     mergeMcp(publicFile, publicEntries);
     results.push({ name: `omp-mcp:${profile}`, status: "integrated", detail: publicFile });
   }
+  if (config.integrations.localflame) {
+    integrateLocalflame(config, results);
+  }
   return results;
+}
+
+function integrateLocalflame(
+  config: PersephoneConfig,
+  results: IntegrationResult[],
+): void {
+  const root = config.integrations.localflameRoot;
+  const installer = path.join(root, "install.sh");
+  if (!existsSync(installer)) {
+    results.push({ name: "localflame", status: "missing", detail: installer });
+    return;
+  }
+
+  const apiKey = process.env[config.web.firecrawl.apiKeyEnv]?.trim();
+  const command = spawnSync("bash", [installer, "--target", "omp"], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    env: {
+      ...childEnvironment(),
+      LOCALFLAME_BASE_URL: config.web.firecrawl.url,
+      ...(apiKey ? { FIRECRAWL_API_KEY: apiKey } : {}),
+    },
+  });
+  results.push({
+    name: "localflame",
+    status: command.status === 0 ? "integrated" : "failed",
+    detail: command.status === 0
+      ? `Applied ${installer} --target omp`
+      : cleanOutput(command),
+  });
 }
 
 function integrateLibrarian(

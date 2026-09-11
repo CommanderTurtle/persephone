@@ -52,6 +52,8 @@ export interface PersephoneConfig {
   };
   integrations: {
     servicesRoot: string;
+    localflameRoot: string;
+    localflame: boolean;
     contextMode: boolean;
     librarian: boolean;
     retrieval: boolean;
@@ -60,10 +62,8 @@ export interface PersephoneConfig {
   };
   web: {
     firecrawl: {
-      enabled: boolean;
       url: string;
       apiKeyEnv: string;
-      timeoutSeconds: number;
     };
     camofox: {
       replaceNativeBrowser: boolean;

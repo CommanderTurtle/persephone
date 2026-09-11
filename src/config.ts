@@ -50,6 +50,8 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
   },
   integrations: {
     servicesRoot: "~/Hermes",
+    localflameRoot: "~/Deepseek/localflame",
+    localflame: true,
     contextMode: true,
     librarian: true,
     retrieval: true,
@@ -58,10 +60,8 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
   },
   web: {
     firecrawl: {
-      enabled: true,
       url: "http://127.0.0.1:3002",
       apiKeyEnv: "FIRECRAWL_API_KEY",
-      timeoutSeconds: 60,
     },
     camofox: {
       replaceNativeBrowser: true,
@@ -128,6 +128,7 @@ export function loadConfig(): PersephoneConfig {
   validateConfig(merged);
   merged.omp.cwd = expandHome(merged.omp.cwd);
   merged.integrations.servicesRoot = expandHome(merged.integrations.servicesRoot);
+  merged.integrations.localflameRoot = expandHome(merged.integrations.localflameRoot);
   return merged;
 }
 
@@ -251,17 +252,17 @@ function validateConfig(config: PersephoneConfig): void {
   if (!config.integrations || typeof config.integrations.servicesRoot !== "string" || !config.integrations.servicesRoot.trim()) {
     throw new Error("integrations.servicesRoot must be a non-empty path");
   }
+  if (typeof config.integrations.localflameRoot !== "string" || !config.integrations.localflameRoot.trim()) {
+    throw new Error("integrations.localflameRoot must be a non-empty path");
+  }
+  validateBoolean(config.integrations.localflame, "integrations.localflame");
   if (!config.web || !config.web.firecrawl || !config.web.camofox) {
     throw new Error("web.firecrawl and web.camofox must be configured");
   }
   validateHttpUrl(config.web.firecrawl.url, "web.firecrawl.url");
   validateEnvName(config.web.firecrawl.apiKeyEnv, "web.firecrawl.apiKeyEnv");
-  if (typeof config.web.firecrawl.enabled !== "boolean") throw new Error("web.firecrawl.enabled must be a boolean");
   if ((config.web.firecrawl as { nativeFallback?: unknown }).nativeFallback === true) {
     throw new Error("web.firecrawl.nativeFallback is no longer supported; hosted search fallback is forbidden");
-  }
-  if (!Number.isInteger(config.web.firecrawl.timeoutSeconds) || config.web.firecrawl.timeoutSeconds < 1 || config.web.firecrawl.timeoutSeconds > 300) {
-    throw new Error("web.firecrawl.timeoutSeconds must be an integer from 1 to 300");
   }
   validateHttpUrl(config.web.camofox.url, "web.camofox.url");
   validateEnvName(config.web.camofox.apiKeyEnv, "web.camofox.apiKeyEnv");

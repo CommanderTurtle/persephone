@@ -27,7 +27,9 @@
   },
   "scripts": {
     "start": "bun src/cli.ts serve",
+    "integrate": "bun src/cli.ts integrate",
     "doctor": "bun src/cli.ts doctor",
+    "update": "bun src/cli.ts update",
     "check": "tsc --noEmit",
     "test": "bun test"
   },

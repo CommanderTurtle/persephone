@@ -47,6 +47,8 @@
   },
   "integrations": {
     "servicesRoot": "~/Hermes",
+    "localflameRoot": "~/Deepseek/localflame",
+    "localflame": true,
     "contextMode": true,
     "librarian": true,
     "retrieval": true,
@@ -55,10 +57,8 @@
   },
   "web": {
     "firecrawl": {
-      "enabled": true,
       "url": "http://127.0.0.1:3002",
-      "apiKeyEnv": "FIRECRAWL_API_KEY",
-      "timeoutSeconds": 60
+      "apiKeyEnv": "FIRECRAWL_API_KEY"
     },
     "camofox": {
       "replaceNativeBrowser": true,
