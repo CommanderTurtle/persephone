@@ -22,14 +22,15 @@ export function workspaceSnapshot(
 ): Record<string, unknown> {
   const environment = { ...process.env, ...readEnvFile(envPath()) };
   const secrets = secretDescriptors(config, environment);
+  const connectors = connectorStates(config, environment);
   return {
     schemaVersion: "persephone.workspace.v1",
     generatedAt: new Date().toISOString(),
     runtime,
     configuration: structuredClone(config),
     secrets,
-    connectors: connectorStates(config, environment),
-    setup: setupGuides(config),
+    connectors,
+    setup: setupGuides(config, connectors),
     counts: db.status(),
     routes: db.listRoutes(),
     schedules: db.listSchedules(),
@@ -175,7 +176,27 @@ function connectorStates(
   };
 }
 
-function setupGuides(config: PersephoneConfig): Record<string, unknown> {
+function setupGuides(config: PersephoneConfig, connectors: Record<string, unknown>): Record<string, unknown> {
+  const signal = connectors.signal as Record<string, unknown>;
+  const discord = connectors.discord as Record<string, unknown>;
+  const slack = connectors.slack as Record<string, unknown>;
+  const slackManifest = JSON.stringify({
+    display_information: { name: "Persephone", description: "Private OMP message gateway" },
+    features: { bot_user: { display_name: "Persephone", always_online: true } },
+    oauth_config: {
+      scopes: {
+        bot: ["app_mentions:read", "channels:history", "chat:write", "groups:history", "im:history", "mpim:history"],
+      },
+    },
+    settings: {
+      event_subscriptions: {
+        bot_events: ["app_mention", "message.channels", "message.groups", "message.im", "message.mpim"],
+      },
+      org_deploy_enabled: false,
+      socket_mode_enabled: true,
+      token_rotation_enabled: false,
+    },
+  }, null, 2);
   return {
     signal: {
       title: "Signal",
@@ -187,8 +208,16 @@ function setupGuides(config: PersephoneConfig): Record<string, unknown> {
         "Enable Signal, save the configuration, and restart Persephone.",
       ],
       copy: [
+        { label: "Link command", value: 'signal-cli link -n "Persephone"' },
+        { label: "HTTP daemon", value: `signal-cli --account +YOURNUMBER daemon --http ${new URL(config.signal.url).host}` },
         { label: "Secret entry", value: `${config.signal.accountEnv}=+15551234567` },
         { label: "Health URL", value: `${config.signal.url.replace(/\/$/, "")}/api/v1/check` },
+      ],
+      resources: [{ label: "signal-cli releases", url: "https://github.com/AsamK/signal-cli/releases" }],
+      validation: [
+        { label: "Connector enabled", ok: signal.enabled === true },
+        { label: "Registered account stored", ok: signal.accountConfigured === true },
+        { label: "Sender or group allowlist configured", ok: signal.allowlistConfigured === true },
       ],
     },
     discord: {
@@ -207,6 +236,13 @@ function setupGuides(config: PersephoneConfig): Record<string, unknown> {
           label: "Bot invite template",
           value: "https://discord.com/oauth2/authorize?client_id=APPLICATION_ID&permissions=68608&scope=bot",
         },
+        { label: "Gateway intents", value: "Guilds, Guild Messages, Direct Messages, Message Content" },
+      ],
+      resources: [{ label: "Discord Developer Portal", url: "https://discord.com/developers/applications" }],
+      validation: [
+        { label: "Connector enabled", ok: discord.enabled === true },
+        { label: "Bot token stored", ok: discord.tokenConfigured === true },
+        { label: "User, server, or channel allowlist configured", ok: discord.allowlistConfigured === true },
       ],
     },
     slack: {
@@ -214,18 +250,22 @@ function setupGuides(config: PersephoneConfig): Record<string, unknown> {
       summary: "Connect a Slack app through Socket Mode and the Web API.",
       steps: [
         "Create a Slack app, enable Socket Mode, and create an app token with connections:write.",
-        "Grant the bot app_mentions:read, chat:write, and the history scopes for the channel types it may use.",
-        "Subscribe to app_mention and message.im; add channel message events only when mention gating is disabled.",
+        "Paste the generated manifest and install the app to the workspace.",
+        "Invite the bot into each channel where it may receive or send messages.",
         `Write the bot and app tokens to ${config.slack.botTokenEnv} and ${config.slack.appTokenEnv}.`,
         "Add user, workspace, or channel IDs to the allowlists, enable Slack, save, and restart Persephone.",
       ],
       copy: [
         { label: "Bot secret entry", value: `${config.slack.botTokenEnv}=xoxb-...` },
         { label: "App secret entry", value: `${config.slack.appTokenEnv}=xapp-...` },
-        {
-          label: "Socket Mode manifest fields",
-          value: "socket_mode_enabled: true\nsettings:\n  event_subscriptions:\n    bot_events:\n      - app_mention\n      - message.im\noauth_config:\n  scopes:\n    bot:\n      - app_mentions:read\n      - chat:write\n      - im:history",
-        },
+        { label: "App manifest", value: slackManifest },
+      ],
+      resources: [{ label: "Slack app configuration", url: "https://api.slack.com/apps" }],
+      validation: [
+        { label: "Connector enabled", ok: slack.enabled === true },
+        { label: "Bot token stored", ok: slack.botTokenConfigured === true },
+        { label: "Socket Mode app token stored", ok: slack.appTokenConfigured === true },
+        { label: "User, workspace, or channel allowlist configured", ok: slack.allowlistConfigured === true },
       ],
     },
   };

@@ -5,6 +5,51 @@ import path from "node:path";
 import { repoRoot } from "./paths.ts";
 import type { PersephoneConfig } from "./types.ts";
 
+const MAX_LOG_CHARACTERS = 500_000;
+
+export interface ServiceLogSnapshot {
+  schemaVersion: "persephone.workspace-logs.v1";
+  generatedAt: string;
+  source: "systemd-user-journal";
+  available: boolean;
+  lines: number;
+  text: string;
+  truncated: boolean;
+  error?: string;
+}
+
+export function serviceLogSnapshot(
+  lines = 200,
+  run: typeof spawnSync = spawnSync,
+  executable: string | null = Bun.which("journalctl"),
+): ServiceLogSnapshot {
+  const boundedLines = Math.max(1, Math.min(Math.trunc(lines), 1000));
+  const base = {
+    schemaVersion: "persephone.workspace-logs.v1" as const,
+    generatedAt: new Date().toISOString(),
+    source: "systemd-user-journal" as const,
+    lines: boundedLines,
+  };
+  if (!executable) {
+    return { ...base, available: false, text: "", truncated: false, error: "journalctl was not found" };
+  }
+  const result = run(executable, [
+    "--user",
+    "--unit=persephone.service",
+    "--no-pager",
+    "--output=short-iso",
+    `--lines=${boundedLines}`,
+  ], { encoding: "utf8", maxBuffer: 2_000_000 });
+  const raw = String(result.stdout || "").replace(/\r\n/g, "\n");
+  const truncated = raw.length > MAX_LOG_CHARACTERS;
+  const text = truncated ? raw.slice(-MAX_LOG_CHARACTERS) : raw;
+  if (result.status !== 0) {
+    const detail = String(result.stderr || result.error?.message || `journalctl exited ${result.status ?? "without a status"}`).trim();
+    return { ...base, available: false, text, truncated, error: detail.slice(-4000) };
+  }
+  return { ...base, available: true, text, truncated };
+}
+
 export function servicePath(): string {
   return path.join(os.homedir(), ".config", "systemd", "user", "persephone.service");
 }

@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DEFAULT_CONFIG } from "../src/config.ts";
 import { PersephoneDatabase } from "../src/database.ts";
+import { serviceLogSnapshot } from "../src/service.ts";
 import { applyWorkspaceMutation, workspaceSnapshot } from "../src/workspace.ts";
 
 const directories: string[] = [];
@@ -50,7 +52,33 @@ describe("workspace owner contract", () => {
     expect((snapshot.workers as unknown[]).length).toBe(1);
     expect(JSON.stringify(snapshot)).not.toContain("secret-value");
     expect((snapshot.setup as Record<string, unknown>).discord).toBeDefined();
+    const discordGuide = (snapshot.setup as Record<string, Record<string, unknown>>).discord;
+    expect(discordGuide?.validation).toEqual([
+      { label: "Connector enabled", ok: false },
+      { label: "Bot token stored", ok: false },
+      { label: "User, server, or channel allowlist configured", ok: false },
+    ]);
     db.close();
+  });
+
+  test("returns bounded service logs through the owner command contract", () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const snapshot = serviceLogSnapshot(25, ((command: string, args: string[]) => {
+      calls.push({ command, args });
+      return { status: 0, stdout: "one\r\ntwo\r\n", stderr: "", pid: 1, output: [] };
+    }) as unknown as typeof spawnSync, "/usr/bin/journalctl");
+    expect(snapshot).toMatchObject({
+      schemaVersion: "persephone.workspace-logs.v1",
+      source: "systemd-user-journal",
+      available: true,
+      lines: 25,
+      text: "one\ntwo\n",
+      truncated: false,
+    });
+    expect(calls).toEqual([{
+      command: "/usr/bin/journalctl",
+      args: ["--user", "--unit=persephone.service", "--no-pager", "--output=short-iso", "--lines=25"],
+    }]);
   });
 
   test("applies one validated configuration and write-only secret mutation", () => {

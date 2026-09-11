@@ -21,6 +21,25 @@ pattern belongs.
 
 ## Source-level findings
 
+### Setup contract comparison
+
+The connector guide was rechecked against Hermes Agent `0.21.1` at source
+revision `a3190625c0a2`. Hermes's `setup gateway` dispatches into separate
+Signal, Discord, and Slack setup functions. Persephone now exposes the same
+provider-side prerequisites as structured owner data: Signal link/daemon
+commands and health URL, Discord's four used Gateway intents and permission
+integer, and a complete Slack Socket Mode manifest matching the events parsed
+by `src/slack.ts`. Diogenes renders those values without maintaining a second
+copy.
+
+The intentional differences follow Persephone's smaller runtime contract.
+Persephone accepts ID allowlists rather than Hermes's username/role expansion,
+does not register native platform slash commands, and puts a delivery channel
+on each schedule rather than defining one global home channel. Connector setup
+therefore writes Persephone's JSON and secret environment file, then restarts
+the Persephone service; it does not write Hermes configuration or start the
+Hermes gateway.
+
 ### 1. Same-route lifecycle operations could race
 
 The inbox previously claimed several rows globally and started each row as an

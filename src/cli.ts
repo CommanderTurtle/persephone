@@ -12,7 +12,7 @@ import { doctor } from "./doctor.ts";
 import { integrate, restoreIntegrations } from "./integrate.ts";
 import { reconcileOmp } from "./omp-reconcile.ts";
 import { repoRoot, stateRoot } from "./paths.ts";
-import { installService, removeService, serviceAction, servicePath } from "./service.ts";
+import { installService, removeService, serviceAction, serviceLogSnapshot, servicePath } from "./service.ts";
 import { applyWorkspaceMutation, readWorkspaceMutation, workspaceSnapshot } from "./workspace.ts";
 
 const [command = "help", ...args] = process.argv.slice(2);
@@ -195,6 +195,13 @@ async function workspace(args: string[]): Promise<void> {
       console.log(JSON.stringify(record, null, 2));
       return;
     }
+    if (action === "logs") {
+      const linesText = option(rest, "--lines") || "200";
+      const lines = Number(linesText);
+      if (!Number.isInteger(lines) || lines < 1 || lines > 1000) throw new Error("--lines must be an integer from 1 to 1000");
+      console.log(JSON.stringify(serviceLogSnapshot(lines), null, 2));
+      return;
+    }
     if (action === "mutate") {
       const consume = rest.includes("--consume");
       const files = rest.filter((value) => value !== "--consume");
@@ -208,7 +215,7 @@ async function workspace(args: string[]): Promise<void> {
       }
       return;
     }
-    throw new Error("Usage: persephone workspace show [--limit N] | queue inbox|outbox ID | mutate FILE.json");
+    throw new Error("Usage: persephone workspace show [--limit N] | queue inbox|outbox ID | logs [--lines N] | mutate FILE.json");
   } finally {
     db.close();
   }
@@ -341,6 +348,7 @@ function help(): void {
   persephone route list
   persephone workspace show [--limit N]
   persephone workspace queue inbox|outbox ID
+  persephone workspace logs [--lines N]
   persephone workspace mutate FILE.json [--consume]
   persephone git-agent help
   persephone zed [DIRECTORY]
