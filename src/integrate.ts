@@ -2,7 +2,6 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { readEnvFile } from "./config.ts";
 import { ompAgentDir, repoRoot, stateRoot } from "./paths.ts";
 import type { PersephoneConfig } from "./types.ts";
 
@@ -114,10 +113,6 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
     } else results.push({ name: "camofox", status: "missing", detail: entry });
   }
 
-  if (config.integrations.librarian) {
-    integrateLibrarian(config, bun, publicEntries, modelRoles, results);
-  }
-
   for (const profile of new Set([config.omp.interactiveProfile, config.omp.profile])) {
     const publicFile = path.join(ompAgentDir(profile), "mcp.json");
     rememberMcp(publicFile, Object.keys(publicEntries));
@@ -129,6 +124,9 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
   }
   if (config.integrations.localflame) {
     integrateLocalflame(config, results);
+  }
+  if (config.integrations.librarian) {
+    integrateLibrarian(config, results);
   }
   return results;
 }
@@ -192,74 +190,27 @@ function integrateLocalflame(
 
 function integrateLibrarian(
   config: PersephoneConfig,
-  bun: string,
-  publicEntries: Record<string, unknown>,
-  modelRoles: Record<string, string> | null,
   results: IntegrationResult[],
 ): void {
   const root = path.join(config.integrations.servicesRoot, "librarian");
-  const publicEntry = path.join(root, "packages", "server", "dist", "mcp", "stdio.js");
-  const privateEntry = path.join(root, "packages", "server", "dist", "mcp", "okf-stdio.js");
-  if (!existsSync(publicEntry) || !existsSync(privateEntry)) {
-    results.push({ name: "librarian", status: "missing", detail: "Run bun install && bun run build in the Librarian repository" });
+  const installer = path.join(root, "integrate.sh");
+  if (!existsSync(installer)) {
+    results.push({ name: "librarian", status: "missing", detail: installer });
     return;
   }
-  const existing = readEnvFile(path.join(root, ".env"));
-  const bundleRoot = existing.BUNDLE_ROOT || path.join(root, "data");
-  const profile = existing.OMP_PROFILE || "librarian";
-  const privateAgent = ompAgentDir(profile);
-  const publicEnv: Record<string, string> = {
-    BUNDLE_ROOT: bundleRoot,
-    LIBRARIAN_AGENT_BACKEND: "omp",
-    OMP_COMMAND: resolveExecutable(config.omp.command) || config.omp.command,
-    OMP_HOME: path.dirname(ompAgentDir("default")),
-    OMP_AGENT_DIR: ompAgentDir(config.omp.profile),
-    OMP_PROFILE: profile,
-    OMP_PROFILE_AGENT_DIR: privateAgent,
-    OMP_TIMEOUT_MS: existing.OMP_TIMEOUT_MS || "600000",
-    OMP_PROVIDER: config.omp.provider || existing.OMP_PROVIDER || "",
-    OMP_MODEL: config.omp.model || existing.OMP_MODEL || "",
-    VLLM_API_KEY: existing.VLLM_API_KEY || process.env.VLLM_API_KEY || "local",
-    QUERY_CACHE: existing.QUERY_CACHE || "true",
-    QUERY_CACHE_TTL: existing.QUERY_CACHE_TTL || "24h",
-    HOT_MEMORY: existing.HOT_MEMORY || "true",
-    HOT_MEMORY_TTL: existing.HOT_MEMORY_TTL || "1h",
-    GIT_AUTOCOMMIT: existing.GIT_AUTOCOMMIT || "false",
-    OTEL_SDK_DISABLED: "true",
-  };
-  publicEntries.librarian = {
-    type: "stdio",
-    command: bun,
-    args: [publicEntry],
+
+  const command = spawnSync("bash", [installer], {
     cwd: root,
-    env: publicEnv,
-    timeout: 660000,
-  };
-  const privateFile = path.join(privateAgent, "mcp.json");
-  rememberMcp(privateFile, [...readMcpServerNames(privateFile), "librarian-okf"]);
-  replaceMcp(privateFile, {
-    "librarian-okf": {
-      type: "stdio",
-      command: bun,
-      args: [privateEntry],
-      cwd: root,
-      env: { BUNDLE_ROOT: bundleRoot, GIT_AUTOCOMMIT: existing.GIT_AUTOCOMMIT || "false" },
-    },
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    env: childEnvironment(),
   });
-  synchronizeProfileConfiguration(ompAgentDir(config.omp.interactiveProfile), privateAgent);
-  configureWorkerProfile(
-    resolveExecutable(config.omp.command) || config.omp.command,
-    profile,
-    config,
-    modelRoles,
-    results,
-    "librarian-profile",
-  );
-  refreshManagedProfileConfig(privateAgent);
   results.push({
     name: "librarian",
-    status: "integrated",
-    detail: `Public MCP plus isolated '${profile}' OMP RPC profile containing only deterministic OKF tools`,
+    status: command.status === 0 ? "integrated" : "failed",
+    detail: command.status === 0
+      ? `Applied ${installer}`
+      : cleanOutput(command),
   });
 }
 
@@ -458,30 +409,6 @@ export function mergeMcp(file: string, entries: Record<string, unknown>): void {
   config.mcpServers = isRecord(config.mcpServers) ? config.mcpServers : {};
   for (const [name, entry] of Object.entries(entries)) config.mcpServers[name] = entry;
   writeJsonAtomic(file, config);
-}
-
-function replaceMcp(file: string, entries: Record<string, unknown>): void {
-  let config: McpConfig = {};
-  if (existsSync(file)) {
-    try {
-      config = JSON.parse(readFileSync(file, "utf8")) as McpConfig;
-    } catch (error) {
-      throw new Error(`Refusing to overwrite malformed OMP MCP config ${file}: ${String(error)}`);
-    }
-  }
-  config.$schema ||= MCP_SCHEMA;
-  config.mcpServers = { ...entries };
-  writeJsonAtomic(file, config);
-}
-
-function readMcpServerNames(file: string): string[] {
-  if (!existsSync(file)) return [];
-  try {
-    const config = JSON.parse(readFileSync(file, "utf8")) as McpConfig;
-    return Object.keys(isRecord(config.mcpServers) ? config.mcpServers : {});
-  } catch (error) {
-    throw new Error(`Refusing to replace malformed OMP MCP config ${file}: ${String(error)}`);
-  }
 }
 
 function synchronizeProfileConfiguration(sourceAgent: string, targetAgent: string): void {
