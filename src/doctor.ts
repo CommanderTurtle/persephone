@@ -63,12 +63,25 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
   }
   const librarian = librarianIntegration(config);
   if (librarian) {
-    const privateFile = path.join(ompAgentDir(librarian.profile), "mcp.json");
-    results.push({
-      check: "mcp:librarian-okf",
-      ok: readMcpNames(privateFile).includes("librarian-okf"),
-      detail: privateFile,
-    });
+    if (librarian.backend === "omp") {
+      const privateFile = path.join(ompAgentDir(librarian.profile), "mcp.json");
+      results.push({
+        check: "mcp:librarian-okf",
+        ok: readMcpNames(privateFile).includes("librarian-okf"),
+        detail: privateFile,
+      });
+    } else {
+      const hermes = Bun.which("hermes");
+      const registry = hermes
+        ? spawnSync(hermes, ["--profile", librarian.profile, "mcp", "list"], { encoding: "utf8" })
+        : null;
+      const output = registry ? `${registry.stdout || ""}\n${registry.stderr || ""}` : "";
+      results.push({
+        check: "mcp:librarian-okf",
+        ok: registry?.status === 0 && /(^|\s)librarian-okf(\s|$)/m.test(output),
+        detail: hermes ? `Hermes profile ${librarian.profile}` : "hermes was not found",
+      });
+    }
   }
   if (config.integrations.contextMode) {
     const packageFile = path.join(config.integrations.servicesRoot, "context-mode", "package.json");
@@ -81,8 +94,13 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
   }
 
   if (includeRuntime) {
-    if (librarian && omp) {
+    if (librarian?.backend === "omp" && omp) {
       results.push(probeMcp(omp, librarian.profile, "librarian-okf"));
+    } else if (librarian?.backend === "hermes") {
+      const hermes = Bun.which("hermes");
+      results.push(hermes
+        ? probeHermesMcp(hermes, librarian.profile, "librarian-okf")
+        : { check: "mcp:librarian-okf:runtime", ok: false, detail: "hermes was not found" });
     }
     if (config.integrations.contextMode && omp) {
       results.push(probeMcp(omp, config.omp.profile, "context-mode"));
@@ -161,10 +179,16 @@ async function probeHttpService(
   }
 }
 
-function librarianIntegration(config: PersephoneConfig): { profile: string } | null {
+function librarianIntegration(config: PersephoneConfig): { backend: "hermes" | "omp"; profile: string } | null {
   if (!config.integrations.librarian) return null;
   const environment = readEnvFile(path.join(config.integrations.servicesRoot, "librarian", ".env"));
-  return { profile: environment.OMP_PROFILE || "librarian" };
+  const backend = environment.LIBRARIAN_AGENT_BACKEND === "omp" ? "omp" : "hermes";
+  return {
+    backend,
+    profile: backend === "omp"
+      ? environment.OMP_PROFILE || "librarian"
+      : environment.LIBRARIAN_PROFILE || "librarian",
+  };
 }
 
 function probeMcp(omp: string, profile: string, server: string): CheckResult {
@@ -190,6 +214,21 @@ function probeMcp(omp: string, profile: string, server: string): CheckResult {
     check: `mcp:${server}:runtime`,
     ok,
     detail: message || (probe.error?.message ?? `OMP RPC exited ${probe.status ?? "without a status"}`),
+  };
+}
+
+function probeHermesMcp(hermes: string, profile: string, server: string): CheckResult {
+  const probe = spawnSync(hermes, ["--profile", profile, "mcp", "test", server], {
+    encoding: "utf8",
+    timeout: 30_000,
+    maxBuffer: 4 * 1024 * 1024,
+    env: { ...process.env, OTEL_SDK_DISABLED: "true" },
+  });
+  const output = `${probe.stdout || ""}\n${probe.stderr || ""}`.trim();
+  return {
+    check: `mcp:${server}:runtime`,
+    ok: probe.status === 0,
+    detail: output || (probe.error?.message ?? `Hermes MCP test exited ${probe.status ?? "without a status"}`),
   };
 }
 
