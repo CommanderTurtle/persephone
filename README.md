@@ -86,9 +86,11 @@ The full `persephone doctor` additionally asks OMP itself to connect to the isol
 OMP plugin. It lists each repository owner and checked-in integration contract,
 the OMP profiles where its MCP is active, and every Persephone-owned OMP value
 that currently differs. In OMP, `/persephone integrations` and the
-`persephone_integrations` tool return the same report. `/persephone reconcile`
-or the approved `persephone_reconcile_omp` tool applies only that reported
-state.
+`persephone_integrations` tool return the same report. The direct
+`/persephone-integrations` command makes that inventory visible in OMP's
+command list. `/persephone reconcile`, `/persephone-reconcile`, and the
+approved `persephone_reconcile_omp` tool all invoke the same narrow owner
+reconciler.
 
 `persephone reconcile` is the narrow post-update command. It does not reinstall integrations, restart services, or rewrite complete OMP configuration files. It reads each owned value through `omp config get`, writes only mismatches through `omp config set`, and patches only declared model capability entries in `models.yml`. Running it repeatedly against matching state performs no writes.
 With `omp.reconcileOnSessionStart` enabled (the default), the installed plugin

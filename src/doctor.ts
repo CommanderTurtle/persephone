@@ -36,6 +36,27 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
       detail: plugins.status === 0 ? "OMP plugin registry" : `${plugins.stdout || ""}\n${plugins.stderr || ""}`.trim(),
     });
   } else results.push({ check: "omp", ok: false, detail: `${config.omp.command} was not found` });
+  const persephone = Bun.which("persephone");
+  results.push({
+    check: "cli:persephone",
+    ok: Boolean(persephone),
+    detail: persephone || "persephone was not found on PATH",
+  });
+  if (persephone) {
+    const inventory = spawnSync(persephone, ["integrations"], {
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 8 * 1024 * 1024,
+      env: { ...process.env, OTEL_SDK_DISABLED: "true" },
+    });
+    results.push({
+      check: "cli:persephone:integrations",
+      ok: inventory.status === 0 && /\"integrations\"\s*:/.test(inventory.stdout),
+      detail: inventory.status === 0
+        ? "persephone integrations returned the owner inventory"
+        : inventory.error?.message || `${inventory.stderr || inventory.stdout}`.trim(),
+    });
+  }
   if (omp) {
     for (const owned of ownedProfiles) {
       if (owned.profile === "default") continue;
@@ -118,14 +139,12 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
   if (includeRuntime) {
     if (omp) {
       for (const owned of ownedProfiles) {
-        if (owned.localflame || (owned.camofox && config.web.camofox.replaceNativeBrowser)) {
-          results.push(...probeOmpToolSurface(
-            omp,
-            owned.profile,
-            owned.localflame,
-            owned.camofox && config.web.camofox.replaceNativeBrowser,
-          ));
-        }
+        results.push(...probeOmpToolSurface(
+          omp,
+          owned.profile,
+          owned.localflame,
+          owned.camofox && config.web.camofox.replaceNativeBrowser,
+        ));
         if (owned.imageModels) {
           results.push(...probeImageModelInputs(omp, owned.profile, config.omp.imageModels));
         }
@@ -227,6 +246,19 @@ function probeOmpToolSurface(
       }
     })
     .find((value) => value?.type === "response" && value.command === "get_state" && value.success === true);
+  const commandFrame = `${command.stdout || ""}\n${command.stderr || ""}`
+    .split(/\r?\n/)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as {
+          type?: unknown;
+          commands?: Array<{ name?: unknown; source?: unknown }>;
+        };
+      } catch {
+        return null;
+      }
+    })
+    .find((value) => value?.type === "available_commands_update");
   if (!state) {
     return [{
       check: `omp-tools:${profile}`,
@@ -235,7 +267,36 @@ function probeOmpToolSurface(
     }];
   }
   const tools = state.data?.dumpTools || [];
-  const results: CheckResult[] = [];
+  const commandNames = new Set((commandFrame?.commands || [])
+    .map((item) => (typeof item.name === "string" ? item.name : ""))
+    .filter(Boolean));
+  const results: CheckResult[] = [
+    {
+      check: `omp-command:${profile}:persephone`,
+      ok: commandNames.has("persephone"),
+      detail: commandNames.has("persephone") ? "extension command is discoverable" : "command is absent from available_commands_update",
+    },
+    {
+      check: `omp-command:${profile}:persephone-integrations`,
+      ok: commandNames.has("persephone-integrations"),
+      detail: commandNames.has("persephone-integrations") ? "direct inventory command is discoverable" : "command is absent from available_commands_update",
+    },
+    {
+      check: `omp-command:${profile}:persephone-reconcile`,
+      ok: commandNames.has("persephone-reconcile"),
+      detail: commandNames.has("persephone-reconcile") ? "direct maintenance command is discoverable" : "command is absent from available_commands_update",
+    },
+    {
+      check: `omp-tool:${profile}:persephone_integrations`,
+      ok: tools.some((tool) => tool.name === "persephone_integrations"),
+      detail: "read-only owner inventory tool",
+    },
+    {
+      check: `omp-tool:${profile}:persephone_reconcile_omp`,
+      ok: tools.some((tool) => tool.name === "persephone_reconcile_omp"),
+      detail: "approved owner maintenance tool",
+    },
+  ];
   if (expectsLocalflame) {
     results.push({
       check: `omp-tool:${profile}:web_search`,

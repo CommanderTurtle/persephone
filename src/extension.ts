@@ -26,6 +26,24 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
     // vanilla OMP must still be allowed to start.
   }
 
+  const showIntegrations = (ctx: ExtensionCommandContext): void => {
+    try {
+      ctx.ui.notify(format(integrationReport(loadConfig())), "info");
+    } catch (error) {
+      ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+    }
+  };
+
+  const reconcileOwnedOmpState = (ctx: ExtensionCommandContext): void => {
+    try {
+      const results = reconcileOmp(loadConfig());
+      ctx.ui.notify(format({ changed: results.filter((item) => item.status === "integrated").length, results }),
+        results.some((item) => item.status === "failed") ? "error" : "info");
+    } catch (error) {
+      ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+    }
+  };
+
   pi.registerCommand("persephone", {
     description: "Inspect Persephone or submit durable prompts",
     getArgumentCompletions: (prefix) =>
@@ -40,11 +58,9 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
           const status = await controlRequest(config, "/v1/status");
           ctx.ui.notify(format(status), "info");
         } else if (command === "integrations") {
-          ctx.ui.notify(format(integrationReport(config)), "info");
+          showIntegrations(ctx);
         } else if (command === "reconcile") {
-          const results = reconcileOmp(config);
-          ctx.ui.notify(format({ changed: results.filter((item) => item.status === "integrated").length, results }),
-            results.some((item) => item.status === "failed") ? "error" : "info");
+          reconcileOwnedOmpState(ctx);
         } else if (command === "schedules") {
           const schedules = await controlRequest(config, "/v1/schedules");
           ctx.ui.notify(format(schedules), "info");
@@ -60,13 +76,23 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerCommand("persephone-integrations", {
+    description: "List integration owners and effective OMP maintenance state",
+    handler: (_args, ctx) => showIntegrations(ctx),
+  });
+
+  pi.registerCommand("persephone-reconcile", {
+    description: "Repair only Persephone-owned OMP configuration drift",
+    handler: (_args, ctx) => reconcileOwnedOmpState(ctx),
+  });
+
   pi.registerTool({
     name: "persephone_integrations",
     label: "Persephone integrations",
     description: "List every integration owner, its checked-in contract, active OMP profiles, and Persephone-owned OMP setting drift without contacting a model or web service.",
     parameters: z.object({}),
     approval: "read",
-    loadMode: "discoverable",
+    loadMode: "essential",
     execute() {
       try {
         const report = integrationReport(loadConfig());
@@ -83,7 +109,7 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
     description: "Repair only OMP settings and image-model metadata owned by Persephone. Correct values and unrelated OMP configuration are left unchanged.",
     parameters: z.object({}),
     approval: "write",
-    loadMode: "discoverable",
+    loadMode: "essential",
     execute() {
       try {
         const results = reconcileOmp(loadConfig());
