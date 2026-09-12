@@ -32,7 +32,7 @@
     "update": "bun src/cli.ts update",
     "check": "tsc --noEmit",
     "test": "bun test",
-    "test:robomp": "bun test test/robomp-workspace.test.ts && python3 test/robomp_workspace_inspect_test.py"
+    "test:robomp": "bun test test/robomp-workspace.test.ts && python3 test/robomp_workspace_inspect_test.py && python3 test/robomp_workspace_agent_test.py"
   },
   "engines": {
     "bun": ">=1.3.14"

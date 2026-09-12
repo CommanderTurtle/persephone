@@ -261,6 +261,7 @@ Persephone native Git agent (RoboOMP)
   persephone git-agent status
   persephone git-agent workspace show [--limit N] [--state open|closed|all]
   persephone git-agent workspace inspect owner/repo#123 [--limit N]
+  persephone git-agent workspace assistant FILE.json [--consume]
   persephone git-agent workspace mutate FILE.json [--consume]
   persephone git-agent triage owner/repo#123
   persephone git-agent cleanup owner/repo#123

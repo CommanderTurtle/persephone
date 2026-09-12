@@ -13,10 +13,13 @@ import {
 import path from "node:path";
 
 const MAX_MUTATION_BYTES = 1_000_000;
+const MAX_ASSISTANT_BYTES = 1_000_000;
 const MAX_HTTP_BODY_BYTES = 8_000_000;
 const DEFAULT_LIMIT = 50;
 const OWNER_REPOSITORY = "https://github.com/can1357/oh-my-pi.git";
 const ISSUE_REFERENCE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[1-9][0-9]*$/;
+const COMMIT_REFERENCE = /^[0-9a-fA-F]{4,40}$/;
+const ASSISTANT_CONTEXT_KINDS = new Set(["issue", "diff", "file", "commit", "pull_request", "run", "log", "artifact"]);
 
 type SettingKind = "boolean" | "csv" | "host" | "integer" | "string";
 
@@ -90,6 +93,14 @@ export interface MutationResult extends Record<string, unknown> {
   action: string;
   changed: boolean;
   restartRequired: boolean;
+}
+
+export interface AssistantRequest {
+  version: 1;
+  operation: "ask" | "history";
+  issue: string;
+  question: string;
+  context: Array<{ kind: string; reference: string }>;
 }
 
 interface CommandResult {
@@ -231,6 +242,7 @@ export async function robompWorkspaceSnapshot(
     runtime: { health, ready, status, logs, events, issues, releases, browse },
     capabilities: {
       reads: ["workspace", "issue", "events", "issues", "releases", "logs", "repository browse"],
+      queries: ["assistant.ask", "assistant.history"],
       actions: [
         "configuration.patch",
         "trigger.triage",
@@ -242,6 +254,17 @@ export async function robompWorkspaceSnapshot(
         "timer.disable",
         "version.sync",
         "review.open",
+      ],
+      assistant: {
+        sessionScope: "per-issue RoboOMP worktree",
+        directWrites: false,
+        proposedActions: ["trigger.triage", "trigger.retry", "trigger.cancel", "issue.cleanup", "audit.dream"],
+      },
+      unavailable: [
+        { id: "host.shell", reason: "The Diogenes browser never receives a host shell." },
+        { id: "git.stage", reason: "RoboOMP owns repository writes inside reviewed issue runs." },
+        { id: "git.commit", reason: "RoboOMP owns commits and pull requests inside reviewed issue runs." },
+        { id: "git.force", reason: "Force operations are outside the owner contract." },
       ],
     },
   };
@@ -263,6 +286,62 @@ export function inspectIssueWorkspace(issue: string, limit = DEFAULT_LIMIT, path
   ], 30_000);
   if (!result.ok) throw new Error(result.stderr || "RoboOMP workspace inspection failed");
   return JSON.parse(result.stdout) as unknown;
+}
+
+export function normalizeAssistantRequest(value: unknown): AssistantRequest {
+  const payload = asRecord(value, "RoboOMP assistant request");
+  if (payload.version !== 1) throw new Error("RoboOMP assistant request version must be 1");
+  const operation = payload.operation === undefined ? "ask" : requiredString(payload.operation, "operation", 20);
+  if (operation !== "ask" && operation !== "history") throw new Error("operation must be ask or history");
+  const issue = requiredIssue(payload.issue);
+  const question = operation === "ask" ? requiredString(payload.question, "question", 32_000) : "";
+  if (question.includes("<diogenes-roboomp-question>") || question.includes("</diogenes-roboomp-question>")) {
+    throw new Error("question contains a reserved transport marker");
+  }
+  const rawContext = payload.context === undefined ? [] : payload.context;
+  if (!Array.isArray(rawContext) || rawContext.length > 16) throw new Error("context must contain at most 16 items");
+  const context: Array<{ kind: string; reference: string }> = [];
+  const seen = new Set<string>();
+  for (const [index, raw] of rawContext.entries()) {
+    const item = asRecord(raw, `context[${index}]`);
+    const kind = requiredString(item.kind, `context[${index}].kind`, 40);
+    if (!ASSISTANT_CONTEXT_KINDS.has(kind)) throw new Error(`unsupported context kind: ${kind}`);
+    const reference = requiredString(item.reference ?? (kind === "issue" ? issue : undefined), `context[${index}].reference`, 4_000);
+    if (new Set(["file", "diff", "artifact"]).has(kind)) validateRelativeReference(reference, index);
+    if (kind === "commit" && !COMMIT_REFERENCE.test(reference)) throw new Error(`context[${index}].reference must be a commit hash`);
+    if (kind === "issue" && reference !== issue) throw new Error("issue context must match the selected issue");
+    if (kind === "pull_request" && !/^#[1-9][0-9]*$/.test(reference)) throw new Error("pull_request context must be #123");
+    const key = `${kind}\0${reference}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      context.push({ kind, reference });
+    }
+  }
+  const issueKey = `issue\0${issue}`;
+  if (!seen.has(issueKey)) context.unshift({ kind: "issue", reference: issue });
+  return { version: 1, operation, issue, question, context };
+}
+
+export function robompAssistant(value: unknown, paths = robompPaths()): Record<string, unknown> {
+  const payload = normalizeAssistantRequest(value);
+  const environment = requireRuntimeConfig(paths);
+  const taskSeconds = boundedInteger(Number(environment.ROBOMP_TASK_TIMEOUT_SECONDS || 3_600), "ROBOMP_TASK_TIMEOUT_SECONDS", 60, 604_800);
+  const graceSeconds = boundedInteger(Number(environment.ROBOMP_TASK_TIMEOUT_HARD_GRACE_SECONDS || 60), "ROBOMP_TASK_TIMEOUT_HARD_GRACE_SECONDS", 0, 86_400);
+  const result = composeCommand(paths, [
+    "exec",
+    "-T",
+    "robomp",
+    "python",
+    "/usr/local/libexec/persephone-robomp-workspace-agent",
+  ], (taskSeconds + graceSeconds + 120) * 1_000, JSON.stringify(payload));
+  if (!result.ok) throw new Error(result.stderr || "RoboOMP assistant request failed");
+  let response: unknown;
+  try { response = JSON.parse(result.stdout) as unknown; }
+  catch { throw new Error("RoboOMP assistant response was not JSON"); }
+  const record = asRecord(response, "RoboOMP assistant response");
+  if (record.schemaVersion !== "persephone.robomp.assistant.v1") throw new Error("RoboOMP returned an unsupported assistant schema");
+  if (record.issue !== payload.issue || record.operation !== payload.operation) throw new Error("RoboOMP returned a mismatched assistant response");
+  return record;
 }
 
 export async function applyRobompMutation(value: unknown, paths = robompPaths()): Promise<MutationResult> {
@@ -416,14 +495,14 @@ function responseError(value: unknown, status: number): string {
   return `HTTP ${status}`;
 }
 
-function composeCommand(paths: RobompPaths, args: string[], timeout: number): CommandResult {
+function composeCommand(paths: RobompPaths, args: string[], timeout: number, input?: string): CommandResult {
   return command("docker", [
     "compose",
     "--project-directory", paths.integration,
     "--env-file", paths.envFile,
     "-f", paths.composeFile,
     ...args,
-  ], paths.root, timeout);
+  ], paths.root, timeout, input);
 }
 
 function runOwnerScript(paths: RobompPaths, args: string[], timeout: number): string {
@@ -432,12 +511,13 @@ function runOwnerScript(paths: RobompPaths, args: string[], timeout: number): st
   return result.stdout;
 }
 
-function command(executable: string, args: string[], cwd: string, timeout: number): CommandResult {
+function command(executable: string, args: string[], cwd: string, timeout: number, input?: string): CommandResult {
   const result: SpawnSyncReturns<string> = spawnSync(executable, args, {
     cwd,
     encoding: "utf8",
     timeout,
     maxBuffer: 16 * 1024 * 1024,
+    input,
     env: { ...process.env, OTEL_SDK_DISABLED: "true", DO_NOT_TRACK: "1" },
   });
   return {
@@ -558,6 +638,12 @@ function validateIssueReference(value: string): void {
   if (!ISSUE_REFERENCE.test(value)) throw new Error("issue must be owner/repository#123");
 }
 
+function validateRelativeReference(value: string, index: number): void {
+  if (path.isAbsolute(value) || /[\0\r\n]/.test(value) || path.normalize(value).split(path.sep).includes("..")) {
+    throw new Error(`context[${index}].reference must be a repository-relative path`);
+  }
+}
+
 function requiredRepository(value: unknown): string {
   const repository = requiredString(value, "repository", 400);
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error("repository must be owner/name");
@@ -595,6 +681,12 @@ function readMutation(file: string): unknown {
   return JSON.parse(readFileSync(file, "utf8")) as unknown;
 }
 
+function readAssistantRequest(file: string): unknown {
+  const size = statSync(file).size;
+  if (size < 2 || size > MAX_ASSISTANT_BYTES) throw new Error(`Assistant request must contain 2-${MAX_ASSISTANT_BYTES} bytes`);
+  return JSON.parse(readFileSync(file, "utf8")) as unknown;
+}
+
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
   return index >= 0 ? args[index + 1] : undefined;
@@ -626,12 +718,24 @@ async function main(): Promise<void> {
     }
     return;
   }
+  if (commandName === "assistant") {
+    const consume = args.includes("--consume");
+    const files = args.filter((item) => item !== "--consume");
+    if (files.length !== 1 || !files[0]) throw new Error("Usage: persephone git-agent workspace assistant FILE.json [--consume]");
+    const file = path.resolve(files[0]);
+    try {
+      console.log(JSON.stringify(robompAssistant(readAssistantRequest(file)), null, 2));
+    } finally {
+      if (consume) rmSync(file, { force: true });
+    }
+    return;
+  }
   if (commandName === "sync-version") {
     const requested = args[0] ? requiredVersion(args[0]) : undefined;
     console.log(JSON.stringify({ schemaVersion: "persephone.robomp.version.v1", ...syncVersion(robompPaths(), requested) }, null, 2));
     return;
   }
-  throw new Error("Usage: workspace show|inspect|mutate|sync-version");
+  throw new Error("Usage: workspace show|inspect|assistant|mutate|sync-version");
 }
 
 if (import.meta.main) {

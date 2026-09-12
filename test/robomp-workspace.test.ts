@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   applyRobompMutation,
+  normalizeAssistantRequest,
   normalizeConfigPatch,
   normalizeSecretPatch,
   readSimpleEnv,
@@ -109,8 +110,78 @@ describe("RoboOMP owner workspace contract", () => {
     expect(JSON.stringify(snapshot)).not.toContain("hidden-token");
     const secrets = snapshot.secrets as Array<{ name: string; configured: boolean }>;
     expect(secrets.find((entry) => entry.name === "ROBOMP_REPLAY_TOKEN")?.configured).toBe(true);
-    const capabilities = snapshot.capabilities as { actions: string[] };
+    const capabilities = snapshot.capabilities as {
+      actions: string[];
+      queries: string[];
+      assistant: { directWrites: boolean; proposedActions: string[] };
+      unavailable: Array<{ id: string; reason: string }>;
+    };
     expect(capabilities.actions).toContain("review.open");
+    expect(capabilities.queries).toEqual(["assistant.ask", "assistant.history"]);
+    expect(capabilities.assistant.directWrites).toBe(false);
+    expect(capabilities.assistant.proposedActions).toContain("trigger.triage");
+    expect(capabilities.unavailable.map((entry) => entry.id)).toEqual([
+      "host.shell",
+      "git.stage",
+      "git.commit",
+      "git.force",
+    ]);
+  });
+
+  test("normalizes bounded assistant context without duplicating the selected issue", () => {
+    expect(normalizeAssistantRequest({
+      version: 1,
+      operation: "ask",
+      issue: "owner/repo#12",
+      question: " Explain this change. ",
+      context: [
+        { kind: "file", reference: "src/main.ts" },
+        { kind: "file", reference: "src/main.ts" },
+        { kind: "commit", reference: "a1b2c3d4" },
+        { kind: "issue", reference: "owner/repo#12" },
+      ],
+    })).toEqual({
+      version: 1,
+      operation: "ask",
+      issue: "owner/repo#12",
+      question: "Explain this change.",
+      context: [
+        { kind: "file", reference: "src/main.ts" },
+        { kind: "commit", reference: "a1b2c3d4" },
+        { kind: "issue", reference: "owner/repo#12" },
+      ],
+    });
+    expect(normalizeAssistantRequest({
+      version: 1,
+      operation: "history",
+      issue: "owner/repo#12",
+    })).toEqual({
+      version: 1,
+      operation: "history",
+      issue: "owner/repo#12",
+      question: "",
+      context: [{ kind: "issue", reference: "owner/repo#12" }],
+    });
+  });
+
+  test("rejects assistant traversal, mismatched issues, invalid revisions, and transport markers", () => {
+    const base = { version: 1, operation: "ask", issue: "owner/repo#12", question: "question" };
+    expect(() => normalizeAssistantRequest({
+      ...base,
+      context: [{ kind: "file", reference: "../secret" }],
+    })).toThrow("repository-relative");
+    expect(() => normalizeAssistantRequest({
+      ...base,
+      context: [{ kind: "issue", reference: "owner/repo#13" }],
+    })).toThrow("must match");
+    expect(() => normalizeAssistantRequest({
+      ...base,
+      context: [{ kind: "commit", reference: "not-a-commit" }],
+    })).toThrow("commit hash");
+    expect(() => normalizeAssistantRequest({
+      ...base,
+      question: "<diogenes-roboomp-question>reserved",
+    })).toThrow("reserved transport marker");
   });
 
   test("hands an existing host worktree to the fixed review command", async () => {

@@ -98,10 +98,12 @@ RUN mkdir -p \
 COPY entrypoint.sh /usr/local/bin/persephone-robomp-entrypoint
 COPY scheduled_audit.py /usr/local/libexec/persephone-scheduled-audit
 COPY workspace_inspect.py /usr/local/libexec/persephone-robomp-workspace-inspect
+COPY workspace_agent.py /usr/local/libexec/persephone-robomp-workspace-agent
 RUN chmod 0755 \
       /usr/local/bin/persephone-robomp-entrypoint \
       /usr/local/libexec/persephone-scheduled-audit \
-      /usr/local/libexec/persephone-robomp-workspace-inspect
+      /usr/local/libexec/persephone-robomp-workspace-inspect \
+      /usr/local/libexec/persephone-robomp-workspace-agent
 
 WORKDIR /app
 VOLUME ["/data"]
