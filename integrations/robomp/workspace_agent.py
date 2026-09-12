@@ -36,6 +36,9 @@ ISSUE_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$")
 SAFE_PATH_RE = re.compile(r"^[^\x00\r\n]+$")
 REVISION_RE = re.compile(r"^[0-9a-fA-F]{4,40}$")
 SOURCE_RE = re.compile(r"(?<![A-Za-z0-9_./-])([A-Za-z0-9_.@+/-]+):(\d+)(?:-(\d+))?")
+EVIDENCE_RE = re.compile(r"\[(E[1-9][0-9]*)\]")
+DIFF_FILE_RE = re.compile(r"^diff --git a/(.+?) b/(.+)$")
+DIFF_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 CONTEXT_KINDS = frozenset({"issue", "diff", "file", "commit", "pull_request", "run", "log", "artifact"})
 PROPOSAL_ACTIONS = frozenset({
     "trigger.triage",
@@ -48,6 +51,108 @@ PROPOSAL_ACTIONS = frozenset({
 
 class WorkspaceAssistantError(RuntimeError):
     """A request cannot be handled inside the selected RoboOMP workspace."""
+
+
+# Adapted from MyAppDesk/GitCito src/main/grounding.ts at
+# 0bab066640ea4d73f4f7e5a580644031f125c1f3 (MIT). GitCito's opaque evidence
+# IDs keep paths and line ranges app-owned instead of trusting model-written
+# locations. This Python form runs inside the existing RoboOMP owner process.
+def build_diff_evidence(
+    diff: str,
+    *,
+    max_chars: int = 24_000,
+    max_hunks: int = 40,
+    max_hunk_chars: int = 4_000,
+    start_index: int = 1,
+) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    omitted = 0
+    used = 0
+    path = ""
+    head: str | None = None
+    body: list[str] = []
+    start_line = 0
+    end_line = 0
+    new_line = 0
+    old_line = 0
+    saw_new = False
+
+    def flush() -> None:
+        nonlocal head, body, omitted, used
+        if head is None:
+            return
+        text = "\n".join([head, *body])
+        if len(text) > max_hunk_chars:
+            text = f"{text[:max_hunk_chars]}\n…(hunk truncated)"
+        head = None
+        body = []
+        if len(items) >= max_hunks or used + len(text) > max_chars:
+            omitted += 1
+            return
+        used += len(text)
+        items.append({
+            "id": f"E{start_index + len(items)}",
+            "path": path,
+            "startLine": start_line,
+            "endLine": max(start_line, end_line),
+            "text": text,
+        })
+
+    for line in diff.split("\n"):
+        file_match = DIFF_FILE_RE.match(line)
+        if file_match:
+            flush()
+            path = file_match.group(2)
+            continue
+        if line.startswith("+++ "):
+            target = line[4:].strip()
+            if target != "/dev/null":
+                path = re.sub(r"^b/", "", target)
+            continue
+        if line.startswith("--- "):
+            source = line[4:].strip()
+            if not path and source != "/dev/null":
+                path = re.sub(r"^a/", "", source)
+            continue
+
+        hunk_match = DIFF_HUNK_RE.match(line)
+        if hunk_match:
+            flush()
+            old_line = int(hunk_match.group(1))
+            new_line = int(hunk_match.group(3))
+            saw_new = int(hunk_match.group(4) or "1") > 0
+            start_line = new_line if saw_new else old_line
+            end_line = start_line
+            head = line
+            continue
+        if head is None:
+            continue
+
+        body.append(line)
+        if line.startswith("+"):
+            end_line = new_line
+            new_line += 1
+        elif line.startswith("-"):
+            if not saw_new:
+                end_line = old_line
+            old_line += 1
+        elif line.startswith(" ") or line == "":
+            end_line = new_line if saw_new else old_line
+            new_line += 1
+            old_line += 1
+    flush()
+    return {"items": items, "omitted": omitted}
+
+
+def serialize_diff_evidence(evidence: Mapping[str, Any]) -> str:
+    blocks = []
+    for item in evidence.get("items", []):
+        end = f"-{item['endLine']}" if item["endLine"] > item["startLine"] else ""
+        blocks.append(f"[{item['id']}] {item['path']}:{item['startLine']}{end}\n{item['text']}")
+    omitted = int(evidence.get("omitted", 0))
+    if omitted:
+        blocks.append(f"({omitted} further hunk(s) omitted — do not reference them.)")
+    return "\n\n".join(blocks)
 
 
 def _record(value: object, field: str) -> dict[str, Any]:
@@ -129,7 +234,8 @@ def build_prompt(request: Mapping[str, Any], details: list[str] | None = None) -
         "The operator selected the following owner-validated context in the Diogenes RoboOMP workspace:\n"
         f"{selections}{detail_text}\n\n"
         "Inspect the repository and its Git history with the available tools before answering. "
-        "Cite repository evidence as `path:line` whenever a file supports a claim. "
+        "Cite owner-provided diff evidence with its opaque `[E#]` identifier. "
+        "For files you inspect with a tool, cite repository evidence as `path:line`. "
         "Do not say that a write, Git operation, retry, cancellation, cleanup, or audit occurred. "
         "If one of those owner operations would help, call propose_roboomp_action; the operator will review it separately.\n\n"
         f"{QUESTION_START}\n{request['question']}\n{QUESTION_END}"
@@ -170,6 +276,7 @@ def context_details(
     database: object,
     repo_dir: Path,
     workspace: object,
+    evidence: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     details: list[str] = []
     issue = str(request["issue"])
@@ -195,7 +302,11 @@ def context_details(
                 repo_dir,
                 ["diff", "--no-ext-diff", "--no-color", "--unified=3", *path_args],
             )
-            details.append(f"current Git diff for {target}:\n{diff}")
+            diff_evidence = build_diff_evidence(diff, start_index=(len(evidence) + 1) if evidence is not None else 1)
+            if evidence is not None:
+                evidence.extend(diff_evidence["items"])
+            rendered = serialize_diff_evidence(diff_evidence)
+            details.append(f"current Git diff for {target}:\n{rendered or diff}")
         elif kind == "commit":
             commit = _git_output(
                 repo_dir,
@@ -211,7 +322,11 @@ def context_details(
                     "--",
                 ],
             )
-            details.append(f"commit {reference}:\n{commit}")
+            diff_evidence = build_diff_evidence(commit, start_index=(len(evidence) + 1) if evidence is not None else 1)
+            if evidence is not None:
+                evidence.extend(diff_evidence["items"])
+            rendered = serialize_diff_evidence(diff_evidence)
+            details.append(f"commit {reference}:\n{rendered or commit}")
         elif kind == "pull_request":
             details.append(f"pull request {reference}: associated with {issue}")
         elif kind == "run":
@@ -275,10 +390,36 @@ def normalize_proposal(value: object, *, issue: str) -> dict[str, Any]:
     }
 
 
-def collect_sources(answer: str, repo_dir: Path) -> list[dict[str, Any]]:
+def collect_sources(
+    answer: str,
+    repo_dir: Path,
+    evidence: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     root = repo_dir.resolve()
     sources: list[dict[str, Any]] = []
     seen: set[tuple[str, int, int]] = set()
+    evidence_index = {str(item.get("id")): item for item in evidence or []}
+    for match in EVIDENCE_RE.finditer(answer):
+        item = evidence_index.get(match.group(1))
+        if item is None:
+            continue
+        relative = str(item["path"])
+        start = int(item["startLine"])
+        end = int(item["endLine"])
+        key = (relative, start, end)
+        if key in seen:
+            continue
+        seen.add(key)
+        sources.append({
+            "id": str(item["id"]),
+            "path": relative,
+            "startLine": start,
+            "endLine": end,
+            "label": f"{relative}:{start}" + (f"-{end}" if end != start else ""),
+            "excerpt": str(item["text"])[:1_200],
+        })
+        if len(sources) >= MAX_SOURCES:
+            return sources
     for match in SOURCE_RE.finditer(answer):
         relative = match.group(1).lstrip("./")
         try:
@@ -488,6 +629,14 @@ def run_request(request: Mapping[str, Any]) -> dict[str, Any]:
         "one of its owner actions is appropriate. Never fabricate a path, line, action result, or tool result."
     )
     try:
+        evidence: list[dict[str, Any]] = []
+        details = context_details(
+            request,
+            database=database,
+            repo_dir=repo_dir,
+            workspace=workspace,
+            evidence=evidence,
+        )
         with RpcClient(
             executable=settings.omp_command,
             cwd=repo_dir,
@@ -516,12 +665,7 @@ def run_request(request: Mapping[str, Any]) -> dict[str, Any]:
                 turn = client.prompt_and_wait(
                     build_prompt(
                         request,
-                        context_details(
-                            request,
-                            database=database,
-                            repo_dir=repo_dir,
-                            workspace=workspace,
-                        ),
+                        details,
                     ),
                     timeout=settings.task_timeout_seconds + settings.task_timeout_hard_grace_seconds,
                 )
@@ -537,7 +681,7 @@ def run_request(request: Mapping[str, Any]) -> dict[str, Any]:
                 "issue": request["issue"],
                 "answer": answer,
                 "messages": messages,
-                "sources": collect_sources(answer, repo_dir),
+                "sources": collect_sources(answer, repo_dir, evidence),
                 "proposals": proposals,
                 "toolActivity": tool_activity[-100:],
                 "tools": [tool.name for tool in state.dump_tools],

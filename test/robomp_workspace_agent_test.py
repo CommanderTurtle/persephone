@@ -128,11 +128,13 @@ class WorkspaceAgentTests(unittest.TestCase):
                     {"kind": "artifact", "reference": "report.md"},
                 ],
             })
+            evidence = []
             details = MODULE.context_details(
                 request,
                 database=database,
                 repo_dir=repo,
                 workspace=SimpleNamespace(artifacts_dir=artifacts),
+                evidence=evidence,
             )
 
         rendered = "\n".join(details)
@@ -142,6 +144,41 @@ class WorkspaceAgentTests(unittest.TestCase):
         self.assertIn("src/main.py", rendered)
         self.assertIn("print('two')", rendered)
         self.assertIn("recent commits", rendered)
+        self.assertEqual(evidence[0]["id"], "E1")
+        self.assertEqual(evidence[0]["path"], "src/main.py")
+        self.assertIn("[E1] src/main.py:1", rendered)
+
+    def test_builds_bounded_opaque_diff_evidence(self) -> None:
+        diff = """diff --git a/src/app.ts b/src/app.ts
+index 1111111..2222222 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -10,3 +10,4 @@ function main() {
+   const a = 1
+-  return a
++  const b = 2
++  return a + b
+ }
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,2 @@
+-# Old
++# New
+ body
+"""
+        evidence = MODULE.build_diff_evidence(diff)
+        self.assertEqual([item["id"] for item in evidence["items"]], ["E1", "E2"])
+        self.assertEqual([item["path"] for item in evidence["items"]], ["src/app.ts", "README.md"])
+        self.assertEqual(evidence["items"][0]["startLine"], 10)
+        self.assertGreaterEqual(evidence["items"][0]["endLine"], 12)
+        self.assertIn("const b = 2", evidence["items"][0]["text"])
+        self.assertIn("[E1] src/app.ts:10-", MODULE.serialize_diff_evidence(evidence))
+        clipped = MODULE.build_diff_evidence(diff, max_chars=60)
+        self.assertEqual(len(clipped["items"]), 1)
+        self.assertEqual(clipped["omitted"], 1)
+        binary = MODULE.build_diff_evidence("diff --git a/x.png b/x.png\nBinary files differ\n")
+        self.assertEqual(binary["items"], [])
 
     def test_collects_only_existing_repository_line_citations(self) -> None:
         with tempfile.TemporaryDirectory(prefix="robomp-assistant-sources-") as raw:
@@ -160,6 +197,24 @@ class WorkspaceAgentTests(unittest.TestCase):
             "endLine": 3,
             "label": "src/module.py:2-3",
             "excerpt": "two\nthree",
+        }])
+
+    def test_collects_only_owner_supplied_opaque_evidence_ids(self) -> None:
+        evidence = [{
+            "id": "E1",
+            "path": "src/module.py",
+            "startLine": 8,
+            "endLine": 10,
+            "text": "@@ -8,2 +8,3 @@\n+fixed",
+        }]
+        result = MODULE.collect_sources("The selected change is supported by [E1], not [E9].", Path("."), evidence)
+        self.assertEqual(result, [{
+            "id": "E1",
+            "path": "src/module.py",
+            "startLine": 8,
+            "endLine": 10,
+            "label": "src/module.py:8-10",
+            "excerpt": "@@ -8,2 +8,3 @@\n+fixed",
         }])
 
 

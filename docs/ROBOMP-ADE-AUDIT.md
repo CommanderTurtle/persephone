@@ -8,9 +8,9 @@ state itself.
 
 ## GitCito reference audit
 
-The interaction audit used GitCito commit
-`0bab066640ea4d73f4f7e5a580644031f125c1f3` as a read-only reference. The
-relevant source was:
+The interaction audit is pinned to GitCito commit
+`0bab066640ea4d73f4f7e5a580644031f125c1f3` (`v4.7.0`, MIT; copyright 2026
+MyAppDesk). The relevant source is:
 
 - `src/main/repoChat.ts`: repository questions and bounded context selection;
 - `src/main/grounding.ts`: file-backed evidence returned with an answer;
@@ -19,9 +19,26 @@ relevant source was:
   before execution;
 - the matching repository-chat and action tests.
 
-Persephone adopts those interaction patterns through its existing OMP and
-RoboOMP interfaces. It does not vendor GitCito, run Electron, share GitCito
-state, or depend on a GitCito checkout.
+This is now a code-level derivation rather than a visual comparison:
+
+- `integrations/robomp/workspace_agent.py` ports GitCito's bounded unified-diff
+  hunk parser and opaque evidence identifiers. The model receives `[E#]`
+  records, and Persephone resolves only identifiers that were in the supplied
+  evidence set back to repository paths and line ranges.
+- Diogenes ports GitCito's subsequence, contiguous-run, word-boundary fuzzy
+  scorer and its bounded per-hunk diff breakdown into the RoboOMP command
+  palette and worktree viewer.
+- Selected context retains GitCito's append-in-order, deduplicate, hard-cap
+  behavior while using RoboOMP's issue/diff/file/commit/run/artifact types.
+- Reviewed operations retain GitCito's separation between a proposed action
+  and execution, but the allowed action union remains RoboOMP's five existing
+  owner operations rather than GitCito's broader desktop Git surface.
+
+Repository discovery itself is not copied: GitCito discovers arbitrary local
+worktrees, while RoboOMP exposes only configured repositories and issue
+worktrees returned by its database/API. GitCito's Electron state, filesystem
+discovery, branding, and theme are not included, and there is no runtime
+dependency on a GitCito checkout.
 
 ## Query contract
 
