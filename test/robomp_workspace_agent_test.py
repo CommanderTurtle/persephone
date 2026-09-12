@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -56,6 +57,8 @@ class WorkspaceAgentTests(unittest.TestCase):
                 **base,
                 "question": f"{MODULE.QUESTION_START}nested",
             })
+        with self.assertRaisesRegex(MODULE.WorkspaceAssistantError, "version must be 1"):
+            MODULE.normalize_request({**base, "version": True})
 
     def test_builds_reviewable_owner_mutations_without_executing_them(self) -> None:
         triage = MODULE.normalize_proposal({
@@ -87,6 +90,14 @@ class WorkspaceAgentTests(unittest.TestCase):
             artifacts = root / "artifacts"
             repo.mkdir()
             artifacts.mkdir()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+            (repo / "src").mkdir()
+            (repo / "src" / "main.py").write_text("print('one')\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "src/main.py"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "initial"], check=True)
+            (repo / "src" / "main.py").write_text("print('two')\n", encoding="utf-8")
             (artifacts / "report.md").write_text("# Result\nPassed.\n", encoding="utf-8")
 
             issue_row = SimpleNamespace(
@@ -112,6 +123,7 @@ class WorkspaceAgentTests(unittest.TestCase):
                 "question": "What happened?",
                 "context": [
                     {"kind": "file", "reference": "src/main.py"},
+                    {"kind": "diff", "reference": "src/main.py"},
                     {"kind": "run", "reference": "delivery-1"},
                     {"kind": "artifact", "reference": "report.md"},
                 ],
@@ -128,6 +140,8 @@ class WorkspaceAgentTests(unittest.TestCase):
         self.assertIn("run delivery-1: type=issues; state=failed; attempts=2", rendered)
         self.assertIn("# Result", rendered)
         self.assertIn("src/main.py", rendered)
+        self.assertIn("print('two')", rendered)
+        self.assertIn("recent commits", rendered)
 
     def test_collects_only_existing_repository_line_citations(self) -> None:
         with tempfile.TemporaryDirectory(prefix="robomp-assistant-sources-") as raw:

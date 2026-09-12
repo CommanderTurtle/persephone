@@ -3,10 +3,9 @@
 
 The browser never receives a shell or filesystem handle.  Persephone passes a
 validated request to this helper inside the RoboOMP container; the helper then
-opens a separate OMP session in the issue worktree.  Read-oriented tools run
-normally.  OMP's write approval mode remains active and its headless approval
-handler declines direct writes, so requested changes become typed owner
-proposals instead of unreviewed repository mutations.
+opens a separate OMP session in the issue worktree.  Only read-oriented OMP
+tools are exposed.  Selected Git state is resolved by this owner process, so
+requested changes become typed owner proposals instead of repository writes.
 """
 
 from __future__ import annotations
@@ -18,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Any, Mapping
 
@@ -64,7 +64,7 @@ def _text(value: object, field: str, maximum: int) -> str:
 
 def normalize_request(value: object) -> dict[str, Any]:
     payload = _record(value, "request")
-    if payload.get("version") != 1:
+    if type(payload.get("version")) is not int or payload.get("version") != 1:
         raise WorkspaceAssistantError("request version must be 1")
     operation = payload.get("operation", "ask")
     if operation not in {"ask", "history"}:
@@ -136,6 +136,34 @@ def build_prompt(request: Mapping[str, Any], details: list[str] | None = None) -
     )
 
 
+def _git_output(repo_dir: Path, arguments: list[str], *, maximum: int = MAX_CONTEXT_DETAIL_CHARS) -> str:
+    """Return bounded, read-only Git evidence without exposing a shell."""
+    env = os.environ.copy()
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_dir), "--no-pager", *arguments],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            env=env,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"Git evidence unavailable: {exc}"
+    rendered = result.stdout.strip()
+    if not rendered:
+        rendered = "(no output)"
+    if len(rendered) > maximum:
+        rendered = f"{rendered[:maximum]}\n… [owner output truncated]"
+    if result.returncode != 0:
+        return f"Git exited {result.returncode}:\n{rendered}"
+    return rendered
+
+
 def context_details(
     request: Mapping[str, Any],
     *,
@@ -155,13 +183,35 @@ def context_details(
                     f"issue {issue}: state={row.state}; classification={row.classification or 'unclassified'}; "
                     f"branch={row.branch or 'not created'}; pull_request={row.pr_number or 'none'}"
                 )
+            status = _git_output(repo_dir, ["status", "--short", "--branch"])
+            history = _git_output(repo_dir, ["log", "-8", "--oneline", "--decorate"], maximum=2_000)
+            details.append(f"repository status for {issue}:\n{status}\nrecent commits:\n{history}")
         elif kind == "file":
             details.append(f"file {reference}: inspect {repo_dir / reference} with repository read tools")
         elif kind == "diff":
             target = "the complete worktree" if reference == "." else reference
-            details.append(f"diff {reference}: inspect the current Git diff for {target}")
+            path_args = [] if reference == "." else ["--", reference]
+            diff = _git_output(
+                repo_dir,
+                ["diff", "--no-ext-diff", "--no-color", "--unified=3", *path_args],
+            )
+            details.append(f"current Git diff for {target}:\n{diff}")
         elif kind == "commit":
-            details.append(f"commit {reference}: inspect this revision with Git before discussing it")
+            commit = _git_output(
+                repo_dir,
+                [
+                    "show",
+                    "--no-ext-diff",
+                    "--no-color",
+                    "--format=fuller",
+                    "--stat",
+                    "--patch",
+                    "--unified=3",
+                    reference,
+                    "--",
+                ],
+            )
+            details.append(f"commit {reference}:\n{commit}")
         elif kind == "pull_request":
             details.append(f"pull request {reference}: associated with {issue}")
         elif kind == "run":
@@ -421,14 +471,20 @@ def run_request(request: Mapping[str, Any]) -> dict[str, Any]:
     env.update(_safe_directory_env(repo_dir))
     env.update(_git_identity_env(settings.resolved_author_name, settings.git_author_email))
     prior = any(workspace.session_dir.glob("*.jsonl"))
-    extra_args = ["--approval-mode", "write"]
+    extra_args = [
+        "--approval-mode",
+        "always-ask",
+        "--tools",
+        "read,grep,glob",
+    ]
     if prior:
         extra_args.append("--continue")
     model = settings.pick_model()
     system_prompt = (
         "You are the read-oriented repository assistant inside Persephone's RoboOMP ADE. "
-        "Use the issue worktree and the selected context. Direct writes and Git mutations require "
-        "operator approval and are declined in this headless turn. Use propose_roboomp_action when "
+        "Use the issue worktree and the selected context. You have repository read, grep, and glob tools; "
+        "selected Git state is included by Persephone. Direct writes, shell execution, and Git mutations "
+        "are unavailable. Use propose_roboomp_action when "
         "one of its owner actions is appropriate. Never fabricate a path, line, action result, or tool result."
     )
     try:

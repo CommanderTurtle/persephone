@@ -52,10 +52,12 @@ bounded assistant history, model/session metadata, tool activity, existing
 
 ## Mutation boundary
 
-The assistant receives read-oriented repository tools. OMP retains write
-approval mode, and the headless approval handler declines write prompts. A
-custom `propose_roboomp_action` tool may return one of these existing owner
-mutations:
+The assistant receives only OMP's `read`, `grep`, and `glob` repository tools.
+OMP runs in `always-ask` mode and its headless approval handler declines any
+unexpected write or execution request. Persephone resolves the selected Git
+status, recent history, diff, and commit evidence into bounded prompt context
+without exposing an arbitrary shell. A custom `propose_roboomp_action` tool
+may return one of these existing owner mutations:
 
 - `trigger.triage`
 - `trigger.retry`
