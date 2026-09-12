@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,6 +79,55 @@ class WorkspaceAgentTests(unittest.TestCase):
                 "action": "trigger.cancel",
                 "reason": "Stop it.",
             }, issue="owner/repo#12")
+
+    def test_resolves_selected_issue_run_file_and_artifact_context(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="robomp-assistant-context-") as raw:
+            root = Path(raw)
+            repo = root / "repo"
+            artifacts = root / "artifacts"
+            repo.mkdir()
+            artifacts.mkdir()
+            (artifacts / "report.md").write_text("# Result\nPassed.\n", encoding="utf-8")
+
+            issue_row = SimpleNamespace(
+                state="working",
+                classification="bug",
+                branch="robomp/12-fix",
+                pr_number=27,
+            )
+            event_row = SimpleNamespace(
+                issue_key="owner/repo#12",
+                event_type="issues",
+                state="failed",
+                attempts=2,
+            )
+            database = SimpleNamespace(
+                get_issue=lambda key: issue_row if key == "owner/repo#12" else None,
+                get_event=lambda delivery: event_row if delivery == "delivery-1" else None,
+            )
+            request = MODULE.normalize_request({
+                "version": 1,
+                "operation": "ask",
+                "issue": "owner/repo#12",
+                "question": "What happened?",
+                "context": [
+                    {"kind": "file", "reference": "src/main.py"},
+                    {"kind": "run", "reference": "delivery-1"},
+                    {"kind": "artifact", "reference": "report.md"},
+                ],
+            })
+            details = MODULE.context_details(
+                request,
+                database=database,
+                repo_dir=repo,
+                workspace=SimpleNamespace(artifacts_dir=artifacts),
+            )
+
+        rendered = "\n".join(details)
+        self.assertIn("state=working", rendered)
+        self.assertIn("run delivery-1: type=issues; state=failed; attempts=2", rendered)
+        self.assertIn("# Result", rendered)
+        self.assertIn("src/main.py", rendered)
 
     def test_collects_only_existing_repository_line_citations(self) -> None:
         with tempfile.TemporaryDirectory(prefix="robomp-assistant-sources-") as raw:

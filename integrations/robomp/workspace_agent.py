@@ -29,6 +29,7 @@ MAX_CONTEXT_ITEMS = 16
 MAX_MESSAGES = 80
 MAX_MESSAGE_CHARS = 32_000
 MAX_SOURCES = 32
+MAX_CONTEXT_DETAIL_CHARS = 4_000
 QUESTION_START = "<diogenes-roboomp-question>"
 QUESTION_END = "</diogenes-roboomp-question>"
 ISSUE_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$")
@@ -116,20 +117,78 @@ def normalize_request(value: object) -> dict[str, Any]:
     }
 
 
-def build_prompt(request: Mapping[str, Any]) -> str:
+def build_prompt(request: Mapping[str, Any], details: list[str] | None = None) -> str:
     selections = "\n".join(
         f"- {item['kind']}: {item['reference']}"
         for item in request["context"]
     )
+    detail_text = ""
+    if details:
+        detail_text = "\n\nOwner-resolved context:\n" + "\n".join(f"- {item}" for item in details)
     return (
         "The operator selected the following owner-validated context in the Diogenes RoboOMP workspace:\n"
-        f"{selections}\n\n"
+        f"{selections}{detail_text}\n\n"
         "Inspect the repository and its Git history with the available tools before answering. "
         "Cite repository evidence as `path:line` whenever a file supports a claim. "
         "Do not say that a write, Git operation, retry, cancellation, cleanup, or audit occurred. "
         "If one of those owner operations would help, call propose_roboomp_action; the operator will review it separately.\n\n"
         f"{QUESTION_START}\n{request['question']}\n{QUESTION_END}"
     )
+
+
+def context_details(
+    request: Mapping[str, Any],
+    *,
+    database: object,
+    repo_dir: Path,
+    workspace: object,
+) -> list[str]:
+    details: list[str] = []
+    issue = str(request["issue"])
+    for item in request["context"]:
+        kind = str(item["kind"])
+        reference = str(item["reference"])
+        if kind == "issue":
+            row = database.get_issue(issue)
+            if row is not None:
+                details.append(
+                    f"issue {issue}: state={row.state}; classification={row.classification or 'unclassified'}; "
+                    f"branch={row.branch or 'not created'}; pull_request={row.pr_number or 'none'}"
+                )
+        elif kind == "file":
+            details.append(f"file {reference}: inspect {repo_dir / reference} with repository read tools")
+        elif kind == "diff":
+            target = "the complete worktree" if reference == "." else reference
+            details.append(f"diff {reference}: inspect the current Git diff for {target}")
+        elif kind == "commit":
+            details.append(f"commit {reference}: inspect this revision with Git before discussing it")
+        elif kind == "pull_request":
+            details.append(f"pull request {reference}: associated with {issue}")
+        elif kind == "run":
+            row = database.get_event(reference)
+            if row is not None and row.issue_key == issue:
+                details.append(
+                    f"run {reference}: type={row.event_type}; state={row.state}; attempts={row.attempts}"
+                )
+        elif kind == "artifact":
+            artifact_root = Path(getattr(workspace, "artifacts_dir")).resolve()
+            candidate = (artifact_root / reference).resolve()
+            try:
+                candidate.relative_to(artifact_root)
+            except ValueError:
+                continue
+            if candidate.is_file():
+                try:
+                    excerpt = candidate.read_text(encoding="utf-8", errors="replace")[:MAX_CONTEXT_DETAIL_CHARS]
+                except OSError:
+                    excerpt = ""
+                if excerpt:
+                    details.append(f"artifact {reference} excerpt:\n{excerpt}")
+                else:
+                    details.append(f"artifact {reference}: binary or empty artifact at {candidate}")
+        elif kind == "log":
+            details.append(f"log {reference}: operator-selected RoboOMP runtime log reference")
+    return details
 
 
 def normalize_proposal(value: object, *, issue: str) -> dict[str, Any]:
@@ -298,7 +357,7 @@ def run_request(request: Mapping[str, Any]) -> dict[str, Any]:
     from robomp.sandbox import _prepare_slot_runtime_env, _safe_directory_env
     from robomp.worker import _build_extra_env
 
-    settings, _database, repo_dir, slot_uid, workspace = _workspace(request)
+    settings, database, repo_dir, slot_uid, workspace = _workspace(request)
     lock_path = workspace.root / ".omp-ade.lock"
     lock_path.touch(mode=0o660, exist_ok=True)
     lock_stream = lock_path.open("r+")
@@ -399,7 +458,15 @@ def run_request(request: Mapping[str, Any]) -> dict[str, Any]:
             answer = ""
             if request["operation"] == "ask":
                 turn = client.prompt_and_wait(
-                    build_prompt(request),
+                    build_prompt(
+                        request,
+                        context_details(
+                            request,
+                            database=database,
+                            repo_dir=repo_dir,
+                            workspace=workspace,
+                        ),
+                    ),
                     timeout=settings.task_timeout_seconds + settings.task_timeout_hard_grace_seconds,
                 )
                 answer = turn.require_assistant_text()
