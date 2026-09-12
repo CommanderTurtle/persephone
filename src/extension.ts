@@ -3,6 +3,8 @@ import path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "./omp-api.ts";
 import { loadConfig } from "./config.ts";
 import { controlRequest } from "./control-client.ts";
+import { collectIntegrationInventory } from "./integration-inventory.ts";
+import { inspectOmpReconciliation, reconcileOmp } from "./omp-reconcile.ts";
 import { ompAgentDir } from "./paths.ts";
 import type { PersephoneConfig } from "./types.ts";
 import { CamofoxBrowserAdapter, type CamofoxBrowserParams } from "./camofox-browser.ts";
@@ -27,7 +29,7 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
   pi.registerCommand("persephone", {
     description: "Inspect Persephone or submit durable prompts",
     getArgumentCompletions: (prefix) =>
-      ["status", "schedules", "routes", "help"]
+      ["status", "integrations", "reconcile", "schedules", "routes", "help"]
         .filter((value) => value.startsWith(prefix || ""))
         .map((value) => ({ label: value, value })),
     handler: async (args: string, ctx: ExtensionCommandContext) => {
@@ -37,6 +39,12 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
         if (command === "status") {
           const status = await controlRequest(config, "/v1/status");
           ctx.ui.notify(format(status), "info");
+        } else if (command === "integrations") {
+          ctx.ui.notify(format(integrationReport(config)), "info");
+        } else if (command === "reconcile") {
+          const results = reconcileOmp(config);
+          ctx.ui.notify(format({ changed: results.filter((item) => item.status === "integrated").length, results }),
+            results.some((item) => item.status === "failed") ? "error" : "info");
         } else if (command === "schedules") {
           const schedules = await controlRequest(config, "/v1/schedules");
           ctx.ui.notify(format(schedules), "info");
@@ -44,10 +52,49 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
           const routes = await controlRequest(config, "/v1/routes");
           ctx.ui.notify(format(routes), "info");
         } else {
-          ctx.ui.notify("/persephone status | schedules | routes", "info");
+          ctx.ui.notify("/persephone status | integrations | reconcile | schedules | routes", "info");
         }
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "persephone_integrations",
+    label: "Persephone integrations",
+    description: "List every integration owner, its checked-in contract, active OMP profiles, and Persephone-owned OMP setting drift without contacting a model or web service.",
+    parameters: z.object({}),
+    approval: "read",
+    loadMode: "discoverable",
+    execute() {
+      try {
+        const report = integrationReport(loadConfig());
+        return { content: [{ type: "text", text: format(report) }], details: report };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Could not inspect integrations: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "persephone_reconcile_omp",
+    label: "Reconcile Persephone OMP settings",
+    description: "Repair only OMP settings and image-model metadata owned by Persephone. Correct values and unrelated OMP configuration are left unchanged.",
+    parameters: z.object({}),
+    approval: "write",
+    loadMode: "discoverable",
+    execute() {
+      try {
+        const results = reconcileOmp(loadConfig());
+        const failed = results.some((item) => item.status === "failed");
+        return {
+          content: [{ type: "text", text: format({ changed: results.filter((item) => item.status === "integrated").length, results }) }],
+          details: results,
+          ...(failed ? { isError: true } : {}),
+        };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Could not reconcile OMP: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
       }
     },
   });
@@ -96,17 +143,33 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    let maintenance = "";
     try {
-      await controlRequest(loadConfig(), "/health");
-      ctx.ui.setStatus("persephone", "Persephone: ready");
+      const config = loadConfig();
+      if (config.omp.reconcileOnSessionStart) {
+        const results = reconcileOmp(config);
+        const changed = results.filter((item) => item.status === "integrated").length;
+        const failed = results.filter((item) => item.status === "failed");
+        maintenance = failed.length ? ` · OMP drift failed ${failed.length}` : changed ? ` · OMP repaired ${changed}` : " · OMP checked";
+        if (failed.length) ctx.ui.notify(format({ ompReconcileFailures: failed }), "warning");
+      }
+      await controlRequest(config, "/health");
+      ctx.ui.setStatus("persephone", `Persephone: ready${maintenance}`);
     } catch {
-      ctx.ui.setStatus("persephone", "Persephone: offline");
+      ctx.ui.setStatus("persephone", `Persephone: offline${maintenance}`);
     }
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
     ctx.ui.setStatus("persephone", undefined);
   });
+}
+
+function integrationReport(config: PersephoneConfig): Record<string, unknown> {
+  return {
+    ...collectIntegrationInventory(config),
+    ompReconciliation: inspectOmpReconciliation(config),
+  };
 }
 
 function registerBrowserTool(pi: ExtensionAPI, config: PersephoneConfig | null): void {

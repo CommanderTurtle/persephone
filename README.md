@@ -20,8 +20,8 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 - Delegated native registration of Context Mode, Librarian, Retrieval, and Camofox, plus direct Codebase Memory registration.
 - Localflame's complete Firecrawl MCP surface, installed through Localflame's own repeatable OMP integration script.
 - A real OMP-compatible `browser` tool backed by local Camofox rather than Puppeteer/Chromium.
-- An idempotent OMP post-update reconciler for Firecrawl-first native search, the Camofox browser adapter, and declared image-model capabilities.
-- A small OMP extension with `/persephone`, `persephone_status`, and `persephone_submit`.
+- An idempotent OMP post-update reconciler for Firecrawl-first native search, the Camofox browser adapter, and declared image-model capabilities. The plugin checks this owned state at session start by default.
+- An OMP extension with `/persephone`, a readable integration inventory, an approved reconciliation tool, gateway status, and durable prompt submission.
 - Zed-first operation through OMP's own `omp acp` bridge.
 - A pinned native RoboOMP deployment with isolated issue worktrees, credential-proxy separation, proposal-only scheduled audits, and Orca review handoff.
 
@@ -63,6 +63,7 @@ Edit those files, then run:
 
 ```bash
 persephone integrate
+persephone integrations
 persephone doctor
 persephone install-service --start
 ```
@@ -81,7 +82,18 @@ The same operations have zero-knowledge repository entrypoints:
 `persephone doctor --integration-only` is the non-service verification used by dashboard installers; it does not require the daemon or Signal to be running.
 The full `persephone doctor` additionally asks OMP itself to connect to the isolated Librarian MCP and report its tool count; it does not send a model prompt.
 
+`persephone integrations` is the read-only inventory shared with the installed
+OMP plugin. It lists each repository owner and checked-in integration contract,
+the OMP profiles where its MCP is active, and every Persephone-owned OMP value
+that currently differs. In OMP, `/persephone integrations` and the
+`persephone_integrations` tool return the same report. `/persephone reconcile`
+or the approved `persephone_reconcile_omp` tool applies only that reported
+state.
+
 `persephone reconcile` is the narrow post-update command. It does not reinstall integrations, restart services, or rewrite complete OMP configuration files. It reads each owned value through `omp config get`, writes only mismatches through `omp config set`, and patches only declared model capability entries in `models.yml`. Running it repeatedly against matching state performs no writes.
+With `omp.reconcileOnSessionStart` enabled (the default), the installed plugin
+runs this same idempotent owner function when an OMP session starts and reports
+whether it checked, repaired, or failed to repair drift in the status bar.
 
 If no provider, model, or thinking level is set in Persephone, each new route inherits the selected OMP worker profile's native defaults. The shipped configuration separates the interactive `default` profile from a `persephone` worker profile. Integration copies model definitions, then disables Advisor and autonomous memory for the headless worker so one background route consumes one model sequence.
 
@@ -114,7 +126,7 @@ Persephone does not register a second `web_search` implementation. Localflame is
 
 Integration also disables OMP's passive startup and marketplace update checks in every managed profile. Updates remain explicit operator actions; no background version request is part of the normal agent lifecycle.
 
-Camofox is HTTP/MCP rather than CDP. Persephone's `browser` adapter maps OMP's named-tab `open`, `run`, and `close` contract onto Camofox's local HTTP API. Browser code runs in a bounded Bun worker with `tab`, `page`, `browser`, `display`, `assert`, and `wait` helpers; normal observation, ref/selector interaction, navigation, evaluation, waits, and screenshots stay compatible. Camofox's MCP remains available for its larger extraction, download, profile, and batch surface. The adapter is linked through OMP's profile-scoped plugin registry for every profile that has Camofox enabled and is loaded as an essential tool. Raw Puppeteer-only APIs are deliberately absent, and Puppeteer never starts. A cold Camofox health response with no browser session is normal; the browser starts on first use.
+Camofox is HTTP/MCP rather than CDP. Persephone's `browser` adapter maps OMP's named-tab `open`, `run`, and `close` contract onto Camofox's local HTTP API. Browser code runs in a bounded Bun worker with `tab`, `page`, `browser`, `display`, `assert`, and `wait` helpers; normal observation, ref/selector interaction, navigation, evaluation, waits, and screenshots stay compatible. Camofox's MCP remains available for its larger extraction, download, profile, and batch surface. The adapter is linked through OMP's profile-scoped plugin registry for every profile that has Camofox enabled and is loaded as an essential tool. Raw Puppeteer-only APIs are deliberately absent, and Puppeteer never starts. The managed Camofox service stays pre-warmed so first use does not spend the harness's request window launching a browser.
 
 `omp.imageModels` contains exact `provider/model` selectors or `@role` aliases for models that accept images directly. Reconciliation adds only the missing `text`/`image` input metadata, enables OMP's native browser-side resize path, and leaves message transport to OMP. The default declares `vllm/qwen3.8-27b`; change the list when the local model selector changes rather than marking every model as multimodal.
 

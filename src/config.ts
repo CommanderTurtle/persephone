@@ -15,6 +15,7 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
     cwd: "~",
     maxWorkers: 1,
     idleSeconds: 1800,
+    reconcileOnSessionStart: true,
     imageModels: ["vllm/qwen3.8-27b"],
   },
   signal: {
@@ -244,6 +245,7 @@ export function validateConfig(
   if (!Number.isInteger(config.omp.idleSeconds) || config.omp.idleSeconds < 30) {
     throw new Error("omp.idleSeconds must be an integer of at least 30");
   }
+  validateBoolean(config.omp.reconcileOnSessionStart, "omp.reconcileOnSessionStart");
   validateStringArray(config.omp.imageModels, "omp.imageModels");
   for (const selector of config.omp.imageModels) {
     if (!selector.startsWith("@") && !selector.includes("/")) {
@@ -321,7 +323,9 @@ export function validateConfig(
   if (typeof config.integrations.localflameRoot !== "string" || !config.integrations.localflameRoot.trim()) {
     throw new Error("integrations.localflameRoot must be a non-empty path");
   }
-  validateBoolean(config.integrations.localflame, "integrations.localflame");
+  for (const name of ["localflame", "contextMode", "librarian", "retrieval", "codebaseMemory", "camofox"] as const) {
+    validateBoolean(config.integrations[name], `integrations.${name}`);
+  }
   if (!config.web || !config.web.firecrawl || !config.web.camofox) {
     throw new Error("web.firecrawl and web.camofox must be configured");
   }

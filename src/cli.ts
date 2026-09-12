@@ -10,7 +10,8 @@ import { PersephoneDaemon } from "./daemon.ts";
 import { PersephoneDatabase } from "./database.ts";
 import { doctor } from "./doctor.ts";
 import { integrate, restoreIntegrations } from "./integrate.ts";
-import { reconcileOmp } from "./omp-reconcile.ts";
+import { collectIntegrationInventory } from "./integration-inventory.ts";
+import { inspectOmpReconciliation, reconcileOmp } from "./omp-reconcile.ts";
 import { repoRoot, stateRoot } from "./paths.ts";
 import { installService, removeService, serviceAction, serviceLogSnapshot, servicePath } from "./service.ts";
 import { applyWorkspaceMutation, readWorkspaceMutation, workspaceSnapshot } from "./workspace.ts";
@@ -28,6 +29,14 @@ try {
     case "reconcile":
       printIntegrations(reconcileOmp(loadConfig()));
       break;
+    case "integrations": {
+      const config = loadConfig();
+      console.log(JSON.stringify({
+        ...collectIntegrationInventory(config),
+        ompReconciliation: inspectOmpReconciliation(config),
+      }, null, 2));
+      break;
+    }
     case "serve":
       await new PersephoneDaemon(loadConfig()).run();
       break;
@@ -337,6 +346,7 @@ function help(): void {
 
   persephone init [--install-service] [--start]
   persephone integrate
+  persephone integrations
   persephone reconcile
   persephone serve
   persephone doctor | status

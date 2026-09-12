@@ -12,6 +12,7 @@
     "cwd": "~",
     "maxWorkers": 1,
     "idleSeconds": 1800,
+    "reconcileOnSessionStart": true,
     "imageModels": [
       "vllm/qwen3.8-27b"
     ]

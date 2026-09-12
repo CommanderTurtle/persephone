@@ -14,6 +14,8 @@ export interface PersephoneConfig {
     cwd: string;
     maxWorkers: number;
     idleSeconds: number;
+    /** Repair only Persephone-owned OMP drift when the plugin starts. */
+    reconcileOnSessionStart: boolean;
     /** Exact provider/model selectors, or @role aliases, that accept direct image input. */
     imageModels: string[];
     provider?: string;
