@@ -15,7 +15,12 @@
     "reconcileOnSessionStart": true,
     "imageModels": [
       "vllm/qwen3.8-27b"
-    ]
+    ],
+    "ensureLanguageServers": true,
+    "memoryBackend": "native",
+    "semanticLoopGuardModels": {
+      "vllm/qwen3.8-27b": "deepseek"
+    }
   },
   "signal": {
     "enabled": false,

@@ -7,6 +7,7 @@ import { DiscordClient } from "./discord.ts";
 import { ompAgentDir, repoRoot, stateRoot } from "./paths.ts";
 import { SlackClient } from "./slack.ts";
 import { discoverOwnedProfiles, inspectOmpReconciliation } from "./omp-reconcile.ts";
+import { inspectOmpNativeTools } from "./omp-native-tools.ts";
 import type { PersephoneConfig } from "./types.ts";
 
 export interface CheckResult {
@@ -98,6 +99,7 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
     detail: delegatedOwnership.length ? delegatedOwnership.join(", ") : "owned by each integration repository",
   });
   results.push(...inspectOmpReconciliation(config));
+  if (config.omp.ensureLanguageServers) results.push(...inspectOmpNativeTools());
 
   const mcpFile = path.join(ompAgentDir(config.omp.profile), "mcp.json");
   const mcpNames = existsSync(mcpFile) ? readMcpNames(mcpFile) : [];
@@ -145,7 +147,7 @@ export async function doctor(config: PersephoneConfig, includeRuntime = true): P
           owned.localflame,
           owned.camofox && config.web.camofox.replaceNativeBrowser,
         ));
-        if (owned.imageModels) {
+        if (owned.managedProfile) {
           results.push(...probeImageModelInputs(omp, owned.profile, config.omp.imageModels));
         }
       }

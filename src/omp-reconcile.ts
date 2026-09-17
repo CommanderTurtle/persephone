@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import path from "node:path";
 import { isSeq, parseDocument } from "yaml";
 
-import { ompAgentDir, ompHome } from "./paths.ts";
+import { ompAgentDir, ompHome, repoRoot } from "./paths.ts";
 import type { PersephoneConfig } from "./types.ts";
 
 export type OmpReconcileStatus = "integrated" | "unchanged" | "missing" | "failed";
@@ -33,7 +33,7 @@ export interface OwnedProfile {
   agentDir: string;
   localflame: boolean;
   camofox: boolean;
-  imageModels: boolean;
+  managedProfile: boolean;
 }
 
 interface McpConfig {
@@ -43,6 +43,17 @@ interface McpConfig {
 }
 
 const EFFORT_SUFFIX = /:(?:off|minimal|low|medium|high|xhigh|max)$/;
+const NATIVE_OMP_SETTINGS: ReadonlyArray<readonly [string, unknown]> = [
+  ["lsp.enabled", true],
+  ["lsp.lazy", true],
+  ["lsp.shared", true],
+  ["task.enableLsp", true],
+  ["model.loopGuard.enabled", true],
+  ["model.loopGuard.checkAssistantContent", true],
+  ["model.loopGuard.toolCallReminder", true],
+  ["model.toolCallLoopGuard.enabled", true],
+  ["model.toolCallLoopGuard.threshold", 5],
+];
 
 /**
  * Repair only the OMP state Persephone positively owns. Every value is read
@@ -66,10 +77,22 @@ export function reconcileOmp(config: PersephoneConfig): OmpReconcileResult[] {
     if (owned.camofox && config.web.camofox.replaceNativeBrowser) {
       results.push(reconcileSetting(run, owned.profile, "browser.enabled", () => false));
     }
-    if (owned.imageModels && config.omp.imageModels.length > 0) {
-      results.push(reconcileSetting(run, owned.profile, "images.autoResize", () => true));
-      results.push(reconcileSetting(run, owned.profile, "images.blockImages", () => false));
-      results.push(reconcileImageModels(run, owned, config.omp.imageModels));
+    if (owned.managedProfile) {
+      for (const [key, value] of NATIVE_OMP_SETTINGS) {
+        results.push(reconcileSetting(run, owned.profile, key, () => value));
+      }
+      results.push(reconcileFsharpLspConfig(owned));
+      if (owned.profile === config.omp.interactiveProfile && config.omp.memoryBackend !== "native") {
+        results.push(reconcileSetting(run, owned.profile, "memory.backend", () => config.omp.memoryBackend));
+      }
+      if (config.omp.imageModels.length > 0) {
+        results.push(reconcileSetting(run, owned.profile, "images.autoResize", () => true));
+        results.push(reconcileSetting(run, owned.profile, "images.blockImages", () => false));
+        results.push(reconcileImageModels(run, owned, config.omp.imageModels));
+      }
+      if (Object.keys(config.omp.semanticLoopGuardModels).length > 0) {
+        results.push(reconcileSemanticLoopGuardModels(run, owned, config.omp.semanticLoopGuardModels));
+      }
     }
   }
   return results;
@@ -94,10 +117,22 @@ export function inspectOmpReconciliation(config: PersephoneConfig): OmpReconcile
     if (owned.camofox && config.web.camofox.replaceNativeBrowser) {
       checks.push(inspectSetting(run, owned.profile, "browser.enabled", () => false));
     }
-    if (owned.imageModels && config.omp.imageModels.length > 0) {
-      checks.push(inspectSetting(run, owned.profile, "images.autoResize", () => true));
-      checks.push(inspectSetting(run, owned.profile, "images.blockImages", () => false));
-      checks.push(inspectImageModels(run, owned, config.omp.imageModels));
+    if (owned.managedProfile) {
+      for (const [key, value] of NATIVE_OMP_SETTINGS) {
+        checks.push(inspectSetting(run, owned.profile, key, () => value));
+      }
+      checks.push(inspectFsharpLspConfig(owned));
+      if (owned.profile === config.omp.interactiveProfile && config.omp.memoryBackend !== "native") {
+        checks.push(inspectSetting(run, owned.profile, "memory.backend", () => config.omp.memoryBackend));
+      }
+      if (config.omp.imageModels.length > 0) {
+        checks.push(inspectSetting(run, owned.profile, "images.autoResize", () => true));
+        checks.push(inspectSetting(run, owned.profile, "images.blockImages", () => false));
+        checks.push(inspectImageModels(run, owned, config.omp.imageModels));
+      }
+      if (Object.keys(config.omp.semanticLoopGuardModels).length > 0) {
+        checks.push(inspectSemanticLoopGuardModels(run, owned, config.omp.semanticLoopGuardModels));
+      }
     }
   }
   return checks;
@@ -124,10 +159,10 @@ export function discoverOwnedProfiles(config: PersephoneConfig): OwnedProfile[] 
         agentDir,
         localflame: config.integrations.localflame && activeMcp(mcp, "localflame"),
         camofox: config.integrations.camofox && activeMcp(mcp, "camofox"),
-        imageModels: configuredProfiles.has(profile),
+        managedProfile: configuredProfiles.has(profile),
       };
     })
-    .filter((entry) => entry.localflame || entry.camofox || entry.imageModels)
+    .filter((entry) => entry.localflame || entry.camofox || entry.managedProfile)
     .sort((left, right) => profileSort(left.profile, right.profile));
 }
 
@@ -270,6 +305,82 @@ function inspectImageModels(
   }
 }
 
+function reconcileSemanticLoopGuardModels(
+  run: OmpCommandRunner,
+  owned: OwnedProfile,
+  declared: PersephoneConfig["omp"]["semanticLoopGuardModels"],
+): OmpReconcileResult {
+  const name = `omp-models:${owned.profile}:semantic-loop-guard`;
+  const resolved = resolveSemanticLoopGuardModels(run, owned.profile, declared);
+  if (!resolved.ok) return { name, status: "failed", detail: resolved.error };
+  if (Object.keys(resolved.models).length === 0) {
+    return { name, status: "unchanged", detail: "No matching semantic loop-guard model selectors" };
+  }
+  try {
+    const patch = patchSemanticLoopGuardModelConfig(owned.agentDir, resolved.models, true);
+    return {
+      name,
+      status: patch.changed ? "integrated" : "unchanged",
+      detail: `${patch.file}: ${formatSemanticLoopGuardModels(resolved.models)}${patch.changed ? " configured" : " already configured"}`,
+    };
+  } catch (error) {
+    return { name, status: "failed", detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function inspectSemanticLoopGuardModels(
+  run: OmpCommandRunner,
+  owned: OwnedProfile,
+  declared: PersephoneConfig["omp"]["semanticLoopGuardModels"],
+): OmpReconcileCheck {
+  const check = `omp-models:${owned.profile}:semantic-loop-guard`;
+  const resolved = resolveSemanticLoopGuardModels(run, owned.profile, declared);
+  if (!resolved.ok) return { check, ok: false, detail: resolved.error };
+  if (Object.keys(resolved.models).length === 0) {
+    return { check, ok: true, detail: "No matching semantic loop-guard model selectors" };
+  }
+  try {
+    const patch = patchSemanticLoopGuardModelConfig(owned.agentDir, resolved.models, false);
+    return {
+      check,
+      ok: !patch.changed,
+      detail: !patch.changed
+        ? `${patch.file}: ${formatSemanticLoopGuardModels(resolved.models)}`
+        : `${patch.file}: semantic loop-guard metadata is missing for ${Object.keys(resolved.models).join(", ")}`,
+    };
+  } catch (error) {
+    return { check, ok: false, detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function reconcileFsharpLspConfig(owned: OwnedProfile): OmpReconcileResult {
+  const name = `omp-lsp-config:${owned.profile}:fsautocomplete`;
+  try {
+    const patch = patchFsharpLspProfileConfig(owned.agentDir, true);
+    return {
+      name,
+      status: patch.changed ? "integrated" : "unchanged",
+      detail: `${patch.file}${patch.changed ? " updated from Persephone's checked-in lsp.json" : " already matches"}`,
+    };
+  } catch (error) {
+    return { name, status: "failed", detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function inspectFsharpLspConfig(owned: OwnedProfile): OmpReconcileCheck {
+  const check = `omp-lsp-config:${owned.profile}:fsautocomplete`;
+  try {
+    const patch = patchFsharpLspProfileConfig(owned.agentDir, false);
+    return {
+      check,
+      ok: !patch.changed,
+      detail: `${patch.file}${patch.changed ? " is missing the checked-in FsAutoComplete declaration" : " matches"}`,
+    };
+  } catch (error) {
+    return { check, ok: false, detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 function resolveImageModels(
   run: OmpCommandRunner,
   profile: string,
@@ -294,6 +405,32 @@ function resolveImageModels(
     if (selector) selectors.push(selector);
   }
   const models = [...new Set(selectors.map(normalizeModelSelector).filter((value): value is string => Boolean(value)))];
+  return { ok: true, models };
+}
+
+function resolveSemanticLoopGuardModels(
+  run: OmpCommandRunner,
+  profile: string,
+  declared: PersephoneConfig["omp"]["semanticLoopGuardModels"],
+): { ok: true; models: PersephoneConfig["omp"]["semanticLoopGuardModels"] } | { ok: false; error: string } {
+  let roles: Record<string, string> | null = null;
+  const models: PersephoneConfig["omp"]["semanticLoopGuardModels"] = {};
+  for (const [item, family] of Object.entries(declared)) {
+    let selector = item;
+    if (item.startsWith("@")) {
+      if (!roles) {
+        const read = readSetting(run, profile, "modelRoles");
+        if (!read.ok) return read;
+        if (!isRecord(read.value)) return { ok: false, error: `modelRoles for ${profile} is not an object` };
+        roles = Object.fromEntries(
+          Object.entries(read.value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+        );
+      }
+      selector = roles[item.slice(1)] || "";
+    }
+    const normalized = normalizeModelSelector(selector);
+    if (normalized) models[normalized] = family;
+  }
   return { ok: true, models };
 }
 
@@ -327,6 +464,61 @@ function patchImageModels(agentDir: string, selectors: string[], write: boolean)
   }
   if (write && changed) writeAtomic(file, String(document));
   return { file, changed };
+}
+
+export function patchSemanticLoopGuardModelConfig(
+  agentDir: string,
+  models: PersephoneConfig["omp"]["semanticLoopGuardModels"],
+  write: boolean,
+): { file: string; changed: boolean } {
+  const file = modelConfigPath(agentDir);
+  const source = existsSync(file) ? readFileSync(file, "utf8") : "providers:\n";
+  const document = parseDocument(source, { keepSourceTokens: true });
+  if (document.errors.length > 0) {
+    throw new Error(`Refusing to edit malformed OMP model config ${file}: ${document.errors.map((error) => error.message).join("; ")}`);
+  }
+  let changed = false;
+  for (const [selector, family] of Object.entries(models)) {
+    const slash = selector.indexOf("/");
+    if (slash < 1 || slash === selector.length - 1) continue;
+    const provider = selector.slice(0, slash);
+    const model = selector.slice(slash + 1);
+    const keyPath = ["providers", provider, "modelOverrides", model, "compat", "thinkingLoopGuard"];
+    if (document.getIn(keyPath) === family) continue;
+    document.setIn(keyPath, family);
+    changed = true;
+  }
+  if (write && changed) writeAtomic(file, String(document));
+  return { file, changed };
+}
+
+export function patchFsharpLspProfileConfig(agentDir: string, write: boolean): { file: string; changed: boolean } {
+  const sourceFile = path.join(repoRoot(), "lsp.json");
+  const source = JSON.parse(readFileSync(sourceFile, "utf8")) as unknown;
+  if (!isRecord(source) || !isRecord(source.servers) || !isRecord(source.servers.fsautocomplete)) {
+    throw new Error(`Malformed Persephone LSP source: ${sourceFile}`);
+  }
+  const file = path.join(agentDir, "lsp.json");
+  let target: Record<string, unknown> = {};
+  if (existsSync(file)) {
+    try {
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as unknown;
+      if (!isRecord(parsed)) throw new Error("top level is not an object");
+      target = parsed;
+    } catch (error) {
+      throw new Error(`Refusing to edit malformed OMP LSP config ${file}: ${String(error)}`);
+    }
+  }
+  const servers = isRecord(target.servers) ? target.servers : {};
+  const desired = source.servers.fsautocomplete;
+  if (sameValue(servers.fsautocomplete, desired)) return { file, changed: false };
+  target.servers = { ...servers, fsautocomplete: desired };
+  if (write) writeAtomic(file, `${JSON.stringify(target, null, 2)}\n`);
+  return { file, changed: true };
+}
+
+function formatSemanticLoopGuardModels(models: PersephoneConfig["omp"]["semanticLoopGuardModels"]): string {
+  return Object.entries(models).map(([selector, family]) => `${selector}=${family}`).join(", ");
 }
 
 function modelConfigPath(agentDir: string): string {

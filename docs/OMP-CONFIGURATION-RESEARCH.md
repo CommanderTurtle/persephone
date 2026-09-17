@@ -7,7 +7,7 @@ This is a source-grounded operational map of oh-my-pi (OMP), followed by a confi
 The review used two sources together:
 
 - DeepWiki's interactive Deep Research over `can1357/oh-my-pi`, last indexed at commit `403931b9` on July 27, 2026;
-- the installed OMP command surface, model catalog, active configuration, MCP registry, plugin registry, and compiled source on the workstation, re-audited at `18.1.16` for the reconciliation pass.
+- the installed OMP command surface, model catalog, active configuration, MCP registry, plugin registry, and compiled source on the workstation, re-audited at `18.2.3` for the native-resilience pass.
 
 The live installation is newer than the DeepWiki snapshot, so live read-only inspection was used to validate defaults and exact behavior where it mattered. The primary DeepWiki references are [architecture](https://deepwiki.com/can1357/oh-my-pi/3-architecture), [system prompts](https://deepwiki.com/can1357/oh-my-pi/4.4-system-prompts), [RPC mode](https://deepwiki.com/can1357/oh-my-pi/6.5-rpc-mode), [remote and web tools](https://deepwiki.com/can1357/oh-my-pi/7.5-remote-and-web-tools), [extension system](https://deepwiki.com/can1357/oh-my-pi/11-extension-system), [MCP integration](https://deepwiki.com/can1357/oh-my-pi/12.3-mcp-integration), [async jobs](https://deepwiki.com/can1357/oh-my-pi/12.4-async-jobs-and-background-execution), [autonomous memory](https://deepwiki.com/can1357/oh-my-pi/12.5-autonomous-memory), [autoresearch](https://deepwiki.com/can1357/oh-my-pi/12.6-autoresearch), [roboomp](https://deepwiki.com/can1357/oh-my-pi/12.7-roboomp-github-triage-bot), and the [settings schema](https://deepwiki.com/can1357/oh-my-pi/13.1-settings-schema).
 
@@ -22,7 +22,7 @@ The most valuable changes are configuration, not more middleware:
 3. correct explicitly declared multimodal model metadata to advertise image input and keep Snapcompact enabled;
 4. enable Advisor experimentally with the same local A1 endpoint, read-only tools, and a one-turn synchronization threshold;
 5. reduce task concurrency from 32 to a workstation-realistic value such as 4;
-6. keep OMP memory disabled while Retrieval remains the semantic/session owner;
+6. preserve OMP's native memory selector; use Sharpshooter for friction-earned project decisions on this workstation while Retrieval remains the separate archive owner;
 7. keep only a tiny set of essential skills visible and let Retrieval search the archive;
 8. supply MCP definitions from Zed itself in ACP sessions, because OMP deliberately does not read its normal MCP file in ACP mode.
 
@@ -39,7 +39,7 @@ The most valuable changes are configuration, not more middleware:
 |Rules and context files|On|Project instructions and always-apply rules enter the prompt directly.|Keep them short; large reference material belongs in Retrieval.|
 |MCP|No servers by default|Stdio, HTTP, and SSE servers with reconnect and live tool refresh.|Use the current local MCP set; keep ownership explicit.|
 |External-device tools (`xdev`)|On|Large external schemas are fetched lazily instead of all entering the prompt.|Keep enabled.|
-|Memory|Mnemopi for the interactive profile|Local, Hindsight, or Mnemopi backends with optional recall and retention.|Use native project-scoped Mnemopi for OMP decisions; leave it off in gateway/Librarian workers.|
+|Memory|Explicit native selector|Local, Hindsight, Mnemopi, or Sharpshooter without Persephone middleware.|Use Sharpshooter for project decisions here; leave it off in gateway/Librarian workers.|
 |Compaction|Snapcompact|Several maintenance strategies, including image-based Snapcompact.|Keep Snapcompact after correcting the A1 image capability metadata.|
 |ACP|Explicit `omp acp`|Native editor protocol, permissions, sessions, extensions, and client-owned MCPs.|Use in Zed; configure MCPs on the Zed side.|
 |RPC|Explicit mode|JSONL prompts, steering, sessions, model control, host tools, and UI requests.|Persephone already uses the correct boundary.|
@@ -181,7 +181,7 @@ Do not point `skills.customDirectories` at all of `~/Hermes`. Do not duplicate e
 
 ## Memory ownership
 
-OMP's optional Mnemopi backend is a real memory system, not a placeholder. It maintains SQLite-backed working, episodic, fact, and embedding data; supports local or remote embeddings; and can automatically recall before turns and retain after turns. Hindsight and simpler local modes are also available.
+OMP's memory backends are real native systems, not placeholders. Mnemopi maintains SQLite-backed working, episodic, fact, and embedding data. Sharpshooter records friction-earned architecture, product, and style decisions in project-scoped files and consolidates queued deltas in the background. Hindsight and the simpler local pipeline also remain available.
 
 That strength is why it is restricted rather than duplicated here. Retrieval, Librarian, Codebase Memory, and Context Mode retain distinct owners:
 
@@ -191,7 +191,7 @@ That strength is why it is restricted rather than duplicated here. Retrieval, Li
 - Context Mode owns intentionally indexed bulk working material;
 - native OMP sessions own their chronological coding transcript.
 
-Mnemopi owns only OMP-specific cross-session decisions. It uses a separate project-scoped SQLite database, local embeddings, a 2,000-token injection ceiling, and the local `smol` model role for structured extraction every four user turns. Retrieval does not mirror this database or automatically inject the same material. Headless Persephone and Librarian profiles keep `memory.backend: off`.
+Persephone no longer hard-codes Mnemopi. `omp.memoryBackend: native` performs no write at all; an explicit value is passed through OMP's own config surface. This workstation selects Sharpshooter so native project-decision memory can evolve with OMP without a Persephone fork. Retrieval does not mirror that bank or inject the same material. Headless Persephone and Librarian profiles keep `memory.backend: off`.
 
 ## MCP, RPC, ACP, and Librarian
 
@@ -313,7 +313,7 @@ compaction:
   remoteStreamingV2Enabled: false
 
 memory:
-  backend: mnemopi
+  backend: sharpshooter
 
 task:
   maxConcurrency: 4
@@ -352,11 +352,12 @@ Keep the current project/profile settings, local model catalog, and MCP registry
 The durable post-update path is now:
 
 ```bash
+persephone omp-tools
 persephone reconcile
 persephone doctor
 ```
 
-The first command reads every owned value before writing. It repairs Firecrawl-first native search only on profiles that activate Localflame, disables OMP's Puppeteer browser only on profiles that activate Camofox, and patches only models listed in `omp.imageModels`. The second command checks those values plus the effective RPC tools and MCP handshakes without sending a model prompt or web request. OMP plugin links are also profile-scoped, so full `persephone integrate` links the Camofox adapter into each discovered owned profile.
+The first command restores the exact Bun-hosted language servers plus FsAutoComplete without changing OMP. Reconciliation reads every owned value before writing: it repairs Firecrawl-first native search only on profiles that activate Localflame, disables OMP's Puppeteer browser only on profiles that activate Camofox, keeps native LSP and loop guards enabled, and patches only models explicitly listed in `omp.imageModels` or `omp.semanticLoopGuardModels`. The doctor checks those values, installed executables, resolved model metadata, effective RPC tools, and MCP handshakes without sending a model prompt or web request. OMP plugin links are profile-scoped, so full `persephone integrate` links the adapter into each discovered owned profile.
 
 ### Native command sequence
 
@@ -373,12 +374,17 @@ omp config set task.agentAdvisor '{"task":"off"}'
 omp config set compaction.methodOrder '["snapcompact","soft"]'
 omp config set compaction.remoteStreamingV2Enabled false
 omp config set images.describeForTextModels true
-omp config set memory.backend mnemopi
-omp config set mnemopi.scoping per-project
-omp config set mnemopi.llmMode smol
-omp config set mnemopi.injectionTokenLimit 2000
-omp config set mnemopi.recallLimit 6
-omp config set mnemopi.enhancedRecall true
+omp config set memory.backend sharpshooter
+
+omp config set lsp.enabled true
+omp config set lsp.lazy true
+omp config set lsp.shared true
+omp config set task.enableLsp true
+omp config set model.loopGuard.enabled true
+omp config set model.loopGuard.checkAssistantContent true
+omp config set model.loopGuard.toolCallReminder true
+omp config set model.toolCallLoopGuard.enabled true
+omp config set model.toolCallLoopGuard.threshold 5
 
 omp config set task.maxConcurrency 4
 omp config set task.maxRecursionDepth 2
@@ -421,7 +427,7 @@ persephone doctor
 1. Apply the zero-egress defaults, corrected multimodal model metadata, explicit Snapcompact strategy, and task concurrency limit.
 2. Enable Advisor for interactive sessions and give it a small, read-only `WATCHDOG.yml` policy.
 3. Observe one substantial Zed or TUI task before enabling Advisor on Persephone routes.
-4. Keep Mnemopi project-scoped and keep the current small visible skill set; Retrieval remains the separate archive.
+4. Keep Sharpshooter project-scoped and keep the current small visible skill set; Retrieval remains the separate archive.
 
 ### Existing integrations to tighten
 

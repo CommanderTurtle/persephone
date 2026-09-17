@@ -12,6 +12,7 @@ import { doctor } from "./doctor.ts";
 import { integrate, restoreIntegrations } from "./integrate.ts";
 import { collectIntegrationInventory } from "./integration-inventory.ts";
 import { inspectOmpReconciliation, reconcileOmp } from "./omp-reconcile.ts";
+import { ensureOmpNativeTools, inspectOmpNativeTools } from "./omp-native-tools.ts";
 import { repoRoot, stateRoot } from "./paths.ts";
 import { installService, removeService, serviceAction, serviceLogSnapshot, servicePath } from "./service.ts";
 import { applyWorkspaceMutation, readWorkspaceMutation, workspaceSnapshot } from "./workspace.ts";
@@ -29,6 +30,20 @@ try {
     case "reconcile":
       printIntegrations(reconcileOmp(loadConfig()));
       break;
+    case "omp-tools": {
+      const config = loadConfig();
+      if (!config.omp.ensureLanguageServers) {
+        console.log("OMP language-server management is disabled in Persephone config.");
+      } else if (args.includes("--check")) {
+        for (const result of inspectOmpNativeTools()) {
+          console.log(`${result.ok ? "ok  " : "FAIL"}  ${result.check.padEnd(42)} ${result.detail}`);
+          if (!result.ok) process.exitCode = 1;
+        }
+      } else {
+        printIntegrations(ensureOmpNativeTools());
+      }
+      break;
+    }
     case "integrations": {
       const config = loadConfig();
       console.log(JSON.stringify({
@@ -348,6 +363,7 @@ function help(): void {
   persephone integrate
   persephone integrations
   persephone reconcile
+  persephone omp-tools [--check]
   persephone serve
   persephone doctor | status
   persephone install-service [--start]

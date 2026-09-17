@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "fsautocomplete": {
+      "command": "fsautocomplete",
+      "args": [],
+      "fileTypes": [".fs", ".fsi", ".fsx"],
+      "languageId": "fsharp",
+      "rootMarkers": ["*.fsproj", "*.fsx", "*.sln"]
+    }
+  }
+}

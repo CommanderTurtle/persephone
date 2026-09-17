@@ -4,7 +4,8 @@ This matrix is the implementation answer to the original OMP migration analysis.
 
 |Need|Owner|State|
 |---|---|---|
-|Hashline editing, LSP, plan enforcement|OMP|Native; untouched|
+|Hashline editing, LSP client, plan enforcement|OMP|Native; no OMP source patch|
+|User-space language-server executables|Persephone appliance + Bun/.NET|Exact, idempotent post-update restore; OMP performs discovery and all protocol work|
 |TUI steering/follow-up queues|OMP|Native; exposed remotely by Persephone|
 |Tasks, subagents, Agent Hub|OMP|Native; untouched|
 |Swarm/DAG orchestration|OMP `@oh-my-pi/swarm-extension`|Native; schedule it rather than recreate it|
@@ -28,7 +29,7 @@ This matrix is the implementation answer to the original OMP migration analysis.
 |Web search, scrape, and indexed reads|Localflame + self-hosted Firecrawl|Seven-tool stdio MCP installed through Localflame's own OMP integration|
 |SearXNG|Firecrawl internal backend|Not exposed as a competing OMP provider|
 |Puppeteer/Chromium browser|OMP|Same-name tool is replaced; the Puppeteer backend is never started|
-|OMP-specific autonomous memory|OMP Mnemopi|Enabled only for the interactive profile, project-scoped and locally embedded|
+|OMP-specific autonomous memory|OMP native backend|Backend choice is explicit; `native` leaves it untouched and this workstation selects Sharpshooter|
 |Hermes gateway|Hermes|Not required by Persephone; may coexist during migration|
 |Orca desktop UI|Orca|Optional stock review surface for RoboOMP PRs; never an agent runtime dependency|
 |`pi-gateway`|Third party|Excluded: outdated runtime and prompt-only policy boundary|
@@ -50,6 +51,7 @@ This matrix is the implementation answer to the original OMP migration analysis.
 - Discord and Slack gateways: **implemented as independent Bun-native platform adapters**.
 - GitHub bot: **delegated to OMP's native roboomp implementation, with a pinned deployment, health/lifecycle commands, and no duplicated worker pool or webhook path**.
 - Local model support: **left native to OMP**, with route-level provider/model selection.
+- Language-server availability: **Bun-only exact package appliance plus FsAutoComplete; native OMP LSP remains the sole client**.
 - Context Mode, Retrieval, Librarian, Codebase Memory, Camofox: **native integration implemented**.
 - Self-hosted Firecrawl research: **delegated to Localflame's stdio MCP**.
 - Camofox-first browsing: **implemented through OMP's native extension seam plus Camofox MCP**.

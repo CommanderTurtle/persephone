@@ -20,7 +20,8 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 - Delegated native registration of Context Mode, Librarian, Retrieval, and Camofox, plus direct Codebase Memory registration.
 - Localflame's complete Firecrawl MCP surface, installed through Localflame's own repeatable OMP integration script.
 - A real OMP-compatible `browser` tool backed by local Camofox rather than Puppeteer/Chromium.
-- An idempotent OMP post-update reconciler for Firecrawl-first native search, the Camofox browser adapter, and declared image-model capabilities. The plugin checks this owned state at session start by default.
+- An idempotent OMP post-update reconciler for Firecrawl-first native search, the Camofox browser adapter, native LSP/loop-guard switches, and narrowly declared model capabilities. The plugin checks this owned state at session start by default.
+- A Bun-only language-server appliance for TypeScript/JavaScript, Python, shell, YAML, HTML/CSS/JSON/ESLint, plus FsAutoComplete through the installed .NET SDK. OMP remains the LSP client.
 - An OMP extension with `/persephone`, a readable integration inventory, an approved reconciliation tool, gateway status, and durable prompt submission.
 - Zed-first operation through OMP's own `omp acp` bridge.
 - A pinned native RoboOMP deployment with isolated issue worktrees, credential-proxy separation, proposal-only scheduled audits, and Orca review handoff.
@@ -29,7 +30,7 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 
 OMP already provides editing, Hashline snapshots, LSP, plan-mode enforcement, tasks, subagents, swarm DAGs, async jobs, artifacts, compaction, ACP, model routing, MCP, skills, rules, and extension hooks. Persephone does not wrap or reimplement any of those. Localflame owns Firecrawl search, scrape, indexed reads, outlines, images, and retained resources as one stdio MCP. Persephone retains only the `browser` compatibility adapter that maps OMP's open/run/close workflow onto local Camofox.
 
-It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, or another memory product. OMP's native Mnemopi backend remains OMP-owned; the interactive profile can use its project-scoped local SQLite memory without involving Persephone. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the platform-adapter boundary, but Hermes is not a runtime dependency. GitHub issue automation remains OMP's native `roboomp` service rather than a second, less-isolated implementation inside Persephone.
+It also does not install `pi-gateway`, `remote-pi`, Orca, Hermes, or another memory product. OMP's memory selector remains OMP-owned: `omp.memoryBackend: "native"` leaves it completely alone, while an explicit native backend such as `sharpshooter` is reconciled without adding middleware. Orca informed the durable run/dispatch/heartbeat model, but no Orca code or UI was copied. Hermes informed the platform-adapter boundary, but Hermes is not a runtime dependency. GitHub issue automation remains OMP's native `roboomp` service rather than a second, less-isolated implementation inside Persephone.
 
 For operators who separately want Orca's desktop worktree view, `scripts/orca-deb.py` provides a version-aware installer for the official stable Debian package. It does not build Orca, clone its source, or make Orca a Persephone dependency. See [the OMP comparison](docs/OMP-THOUGHTS-COMPARISON.md#optional-stock-orca-companion).
 
@@ -92,7 +93,7 @@ command list. `/persephone reconcile`, `/persephone-reconcile`, and the
 approved `persephone_reconcile_omp` tool all invoke the same narrow owner
 reconciler.
 
-`persephone reconcile` is the narrow post-update command. It does not reinstall integrations, restart services, or rewrite complete OMP configuration files. It reads each owned value through `omp config get`, writes only mismatches through `omp config set`, and patches only declared model capability entries in `models.yml`. Running it repeatedly against matching state performs no writes.
+`persephone reconcile` is the narrow post-update command. It does not reinstall integrations, restart services, or rewrite complete OMP configuration files. It reads each owned value through `omp config get`, writes only mismatches through `omp config set`, and patches only declared model capability entries in `models.yml`. Running it repeatedly against matching state performs no writes. `persephone omp-tools --check` is the read-only LSP appliance check; `persephone omp-tools` restores only missing or drifted exact packages.
 With `omp.reconcileOnSessionStart` enabled (the default), the installed plugin
 runs this same idempotent owner function when an OMP session starts and reports
 whether it checked, repaired, or failed to repair drift in the status bar.
@@ -132,14 +133,18 @@ Camofox is HTTP/MCP rather than CDP. Persephone's `browser` adapter maps OMP's n
 
 `omp.imageModels` contains exact `provider/model` selectors or `@role` aliases for models that accept images directly. Reconciliation adds only the missing `text`/`image` input metadata, enables OMP's native browser-side resize path, and leaves message transport to OMP. The default declares `vllm/qwen3.8-27b`; change the list when the local model selector changes rather than marking every model as multimodal.
 
+`omp.semanticLoopGuardModels` is equally narrow. It adds OMP's own `compat.thinkingLoopGuard` metadata to explicitly named local models, preserving every other compatibility field. The default local Qwen selector opts into OMP's generic DeepSeek-family semantic detector because OMP otherwise applies only exact-cycle detection to an unclassified custom model. Native stream-loop and repeated-identical-tool-call guards remain enabled through ordinary `omp config` keys; Persephone does not replace either implementation.
+
+`omp.ensureLanguageServers` keeps a practical user-space set available after global Bun updates. `persephone integrate` uses only `bun install --global --exact` for the JavaScript-hosted servers and `dotnet tool` for FsAutoComplete. Reconciliation merges the checked-in `lsp.json` FsAutoComplete declaration into each managed profile's native user-level LSP config without replacing other servers; every other server uses OMP's built-in definitions and project-marker discovery. Runtime-specific servers such as `gopls` or `clangd` remain the corresponding language toolchain's responsibility instead of causing Persephone to install system packages. `lsp.lazy` and `lsp.shared` stay enabled, so the welcome screen can advertise applicable servers without eagerly starting one process per project.
+
 Existing OMP MCP entries are preserved. Delegated installers remain the only writers of their own MCP definitions. OMP settings are read before mutation, unrelated settings are left alone, and malformed model YAML is never overwritten. Integration applies the workstation's eight-sequence policy through OMP's own `config set` command:
 
 - the interactive profile has one primary turn, one Advisor, and up to four native OMP task workers;
 - Persephone reserves one persistent worker;
 - Librarian reserves one isolated delegated worker;
-- brief Mnemopi extraction overlaps are queued by vLLM rather than creating another permanent worker.
+- an explicitly selected native OMP memory backend uses OMP's own model role and scheduler rather than another Persephone worker.
 
-Every built-in OMP model role is filled from the configured local default unless that role already has an explicit selector. Snapcompact remains native, while both remote-compaction switches, hosted search, automatic marketplace traffic, and model fallback are disabled. Interactive Mnemopi uses the local `smol` role for structured extraction every four user turns; durable gateway and Librarian profiles keep autonomous memory and Advisor disabled. Retrieval and Persephone expose one concise skill directory each instead of advertising the archived skill corpus.
+Every built-in OMP model role is filled from the configured local default unless that role already has an explicit selector. Snapcompact remains native, while both remote-compaction switches, hosted search, automatic marketplace traffic, and model fallback are disabled. The interactive memory backend is selected by `omp.memoryBackend`; `native` performs no write, while this workstation selects OMP's Sharpshooter project-decision memory. Durable gateway and Librarian profiles keep autonomous memory and Advisor disabled. Retrieval and Persephone expose one concise skill directory each instead of advertising the archived skill corpus.
 
 The worker profiles receive managed copies of the interactive model definitions, but not its sessions, model cache, or credential database. The isolated Librarian profile contains only its deterministic `librarian-okf` MCP surface, preventing delegated work from recursively reaching the public Librarian or the ordinary external-tool stack. Librarian's Hermes configuration is not changed; the OMP MCP receives explicit environment overrides, so both backends can coexist.
 
@@ -290,6 +295,7 @@ OMP deliberately gives the ACP client ownership of MCP servers. Zed sessions do 
 persephone status
 persephone doctor
 persephone reconcile
+persephone omp-tools --check
 persephone start
 persephone stop
 persephone restart

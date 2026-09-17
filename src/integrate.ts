@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { discoverOwnedProfiles, reconcileOmp } from "./omp-reconcile.ts";
+import { ensureOmpNativeTools } from "./omp-native-tools.ts";
 import { ompAgentDir, repoRoot, stateRoot } from "./paths.ts";
 import type { PersephoneConfig } from "./types.ts";
 
@@ -45,6 +46,8 @@ export function integrate(config: PersephoneConfig): IntegrationResult[] {
   const results: IntegrationResult[] = [];
   const omp = resolveExecutable(config.omp.command);
   if (!omp) throw new Error(`OMP command was not found: ${config.omp.command}`);
+
+  if (config.omp.ensureLanguageServers) results.push(...ensureOmpNativeTools());
 
   linkPersephonePlugin(omp, "default", results);
 
@@ -320,16 +323,6 @@ function configureInteractiveProfile(
     ["task.maxConcurrency", "4"],
     ["task.maxRecursionDepth", "2"],
     ["task.batch", "true"],
-    ["memory.backend", "mnemopi"],
-    ["mnemopi.scoping", "per-project"],
-    ["mnemopi.autoRecall", "true"],
-    ["mnemopi.autoRetain", "true"],
-    ["mnemopi.llmMode", "smol"],
-    ["mnemopi.enhancedRecall", "true"],
-    ["mnemopi.polyphonicRecall", "false"],
-    ["mnemopi.proactiveLinking", "false"],
-    ["mnemopi.injectionTokenLimit", "2000"],
-    ["mnemopi.recallLimit", "6"],
     ["compaction.methodOrder", JSON.stringify(["snapcompact", "soft"])],
     ["compaction.remoteStreamingV2Enabled", "false"],
     ["images.describeForTextModels", "true"],
@@ -344,6 +337,7 @@ function configureInteractiveProfile(
     ["skills.enableSkillCommands", "true"],
     ["skills.customDirectories", JSON.stringify(skills)],
   ];
+  if (config.omp.memoryBackend !== "native") values.push(["memory.backend", config.omp.memoryBackend]);
   if (modelRoles) values.unshift(["modelRoles", JSON.stringify(modelRoles)]);
   configureProfile(omp, profile, values, results, `interactive-profile:${profile}`);
 }

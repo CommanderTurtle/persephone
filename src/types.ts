@@ -1,4 +1,6 @@
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type OmpMemoryBackend = "native" | "off" | "local" | "hindsight" | "mnemopi" | "sharpshooter";
+export type ThinkingLoopGuardFamily = "gemini" | "deepseek" | "xai";
 
 export interface PersephoneConfig {
   version: 1;
@@ -18,6 +20,12 @@ export interface PersephoneConfig {
     reconcileOnSessionStart: boolean;
     /** Exact provider/model selectors, or @role aliases, that accept direct image input. */
     imageModels: string[];
+    /** Keep the practical user-space LSP set present through Bun/OMP upgrades. */
+    ensureLanguageServers: boolean;
+    /** Native means Persephone does not choose an OMP memory backend. */
+    memoryBackend: OmpMemoryBackend;
+    /** Models that should opt into OMP's native semantic streaming loop detector. */
+    semanticLoopGuardModels: Record<string, ThinkingLoopGuardFamily>;
     provider?: string;
     model?: string;
     thinking?: ThinkingLevel;

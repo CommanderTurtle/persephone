@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { configRoot, expandHome } from "./paths.ts";
-import type { PersephoneConfig, ThinkingLevel } from "./types.ts";
+import type { OmpMemoryBackend, PersephoneConfig, ThinkingLevel, ThinkingLoopGuardFamily } from "./types.ts";
 
 const THINKING = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const OMP_MEMORY_BACKENDS = new Set<OmpMemoryBackend>(["native", "off", "local", "hindsight", "mnemopi", "sharpshooter"]);
+const LOOP_GUARD_FAMILIES = new Set<ThinkingLoopGuardFamily>(["gemini", "deepseek", "xai"]);
 
 export const DEFAULT_CONFIG: PersephoneConfig = {
   version: 1,
@@ -17,6 +19,11 @@ export const DEFAULT_CONFIG: PersephoneConfig = {
     idleSeconds: 1800,
     reconcileOnSessionStart: true,
     imageModels: ["vllm/qwen3.8-27b"],
+    ensureLanguageServers: true,
+    memoryBackend: "native",
+    semanticLoopGuardModels: {
+      "vllm/qwen3.8-27b": "deepseek",
+    },
   },
   signal: {
     enabled: false,
@@ -246,10 +253,25 @@ export function validateConfig(
     throw new Error("omp.idleSeconds must be an integer of at least 30");
   }
   validateBoolean(config.omp.reconcileOnSessionStart, "omp.reconcileOnSessionStart");
+  validateBoolean(config.omp.ensureLanguageServers, "omp.ensureLanguageServers");
   validateStringArray(config.omp.imageModels, "omp.imageModels");
   for (const selector of config.omp.imageModels) {
     if (!selector.startsWith("@") && !selector.includes("/")) {
       throw new Error(`omp.imageModels entry must be provider/model or @role: ${selector}`);
+    }
+  }
+  if (!OMP_MEMORY_BACKENDS.has(config.omp.memoryBackend)) {
+    throw new Error(`Unsupported OMP memory backend: ${String(config.omp.memoryBackend)}`);
+  }
+  if (!isRecord(config.omp.semanticLoopGuardModels)) {
+    throw new Error("omp.semanticLoopGuardModels must be an object");
+  }
+  for (const [selector, family] of Object.entries(config.omp.semanticLoopGuardModels)) {
+    if (!selector.startsWith("@") && !selector.includes("/")) {
+      throw new Error(`omp.semanticLoopGuardModels key must be provider/model or @role: ${selector}`);
+    }
+    if (!LOOP_GUARD_FAMILIES.has(family as ThinkingLoopGuardFamily)) {
+      throw new Error(`Unsupported semantic loop guard family for ${selector}: ${String(family)}`);
     }
   }
   if (config.omp.thinking && !THINKING.has(config.omp.thinking)) {
@@ -381,6 +403,10 @@ function validateBoolean(value: unknown, field: string): asserts value is boolea
 
 function hasAny(...values: string[][]): boolean {
   return values.some((entries) => entries.length > 0);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export function readEnvFile(file: string): Record<string, string> {
