@@ -284,6 +284,11 @@ function probeOmpToolSurface(
       detail: commandNames.has("persephone-integrations") ? "direct inventory command is discoverable" : "command is absent from available_commands_update",
     },
     {
+      check: `omp-command:${profile}:persephone-native`,
+      ok: commandNames.has("persephone-native"),
+      detail: commandNames.has("persephone-native") ? "live native OMP health command is discoverable" : "command is absent from available_commands_update",
+    },
+    {
       check: `omp-command:${profile}:persephone-reconcile`,
       ok: commandNames.has("persephone-reconcile"),
       detail: commandNames.has("persephone-reconcile") ? "direct maintenance command is discoverable" : "command is absent from available_commands_update",

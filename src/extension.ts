@@ -5,7 +5,8 @@ import { loadConfig } from "./config.ts";
 import { controlRequest } from "./control-client.ts";
 import { collectIntegrationInventory } from "./integration-inventory.ts";
 import { inspectOmpReconciliation, reconcileOmp } from "./omp-reconcile.ts";
-import { ompAgentDir } from "./paths.ts";
+import { inspectOmpNativeTools } from "./omp-native-tools.ts";
+import { ompAgentDir, repoRoot } from "./paths.ts";
 import type { PersephoneConfig } from "./types.ts";
 import { CamofoxBrowserAdapter, type CamofoxBrowserParams } from "./camofox-browser.ts";
 
@@ -47,7 +48,7 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
   pi.registerCommand("persephone", {
     description: "Inspect Persephone or submit durable prompts",
     getArgumentCompletions: (prefix) =>
-      ["status", "integrations", "reconcile", "schedules", "routes", "help"]
+      ["status", "integrations", "native", "reconcile", "schedules", "routes", "help"]
         .filter((value) => value.startsWith(prefix || ""))
         .map((value) => ({ label: value, value })),
     handler: async (args: string, ctx: ExtensionCommandContext) => {
@@ -59,6 +60,8 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
           ctx.ui.notify(format(status), "info");
         } else if (command === "integrations") {
           showIntegrations(ctx);
+        } else if (command === "native") {
+          ctx.ui.notify(format(nativeOmpReport(config)), "info");
         } else if (command === "reconcile") {
           reconcileOwnedOmpState(ctx);
         } else if (command === "schedules") {
@@ -68,7 +71,7 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
           const routes = await controlRequest(config, "/v1/routes");
           ctx.ui.notify(format(routes), "info");
         } else {
-          ctx.ui.notify("/persephone status | integrations | reconcile | schedules | routes", "info");
+          ctx.ui.notify("/persephone status | integrations | native | reconcile | schedules | routes", "info");
         }
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
@@ -79,6 +82,17 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
   pi.registerCommand("persephone-integrations", {
     description: "List integration owners and effective OMP maintenance state",
     handler: (_args, ctx) => showIntegrations(ctx),
+  });
+
+  pi.registerCommand("persephone-native", {
+    description: "Show live native OMP, LSP, loop-guard, and memory ownership checks",
+    handler: (_args, ctx) => {
+      try {
+        ctx.ui.notify(format(nativeOmpReport(loadConfig())), "info");
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      }
+    },
   });
 
   pi.registerCommand("persephone-reconcile", {
@@ -106,7 +120,7 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "persephone_reconcile_omp",
     label: "Reconcile Persephone OMP settings",
-    description: "Repair only OMP settings and image-model metadata owned by Persephone. Correct values and unrelated OMP configuration are left unchanged.",
+    description: "Repair only OMP settings and model/LSP metadata owned by Persephone. Correct values and unrelated OMP configuration are left unchanged.",
     parameters: z.object({}),
     approval: "write",
     loadMode: "essential",
@@ -168,33 +182,113 @@ export default function persephoneExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.on("session_start", async (_event, ctx) => {
-    let maintenance = "";
-    try {
-      const config = loadConfig();
-      if (config.omp.reconcileOnSessionStart) {
-        const results = reconcileOmp(config);
-        const changed = results.filter((item) => item.status === "integrated").length;
-        const failed = results.filter((item) => item.status === "failed");
-        maintenance = failed.length ? ` · OMP drift failed ${failed.length}` : changed ? ` · OMP repaired ${changed}` : " · OMP checked";
-        if (failed.length) ctx.ui.notify(format({ ompReconcileFailures: failed }), "warning");
+  let sessionActive = false;
+  pi.on("session_start", (_event, ctx) => {
+    sessionActive = true;
+    ctx.ui.setStatus("persephone", "Persephone: checking native OMP…");
+    // Reconciliation invokes OMP's supported CLI repeatedly. Run it after the
+    // session surface is live so plugin commands, RPC, and the TUI never wait
+    // for the post-update audit to complete.
+    void (async () => {
+      let maintenance = "";
+      let nativeTools = "";
+      let memory = "";
+      let config: PersephoneConfig;
+      try {
+        config = loadConfig();
+        if (config.omp.reconcileOnSessionStart) {
+          const result = await reconcileOmpInChild();
+          maintenance = result.failed ? ` · OMP drift failed ${result.failed}` : result.changed ? ` · OMP repaired ${result.changed}` : " · OMP checked";
+          if (sessionActive && result.failed) ctx.ui.notify(format({ ompReconcileFailure: result.output }), "warning");
+        }
+        if (config.omp.ensureLanguageServers) {
+          const checks = inspectOmpNativeTools();
+          const failed = checks.filter((item) => !item.ok);
+          nativeTools = failed.length ? ` · LSP drift ${failed.length}` : " · LSP ready";
+          if (sessionActive && failed.length) ctx.ui.notify(format({ ompNativeToolFailures: failed }), "warning");
+        } else {
+          nativeTools = " · LSP unmanaged";
+        }
+        memory = config.omp.memoryBackend === "sharpshooter"
+          ? " · Sharpshooter"
+          : ` · memory ${config.omp.memoryBackend}`;
+      } catch (error) {
+        if (sessionActive) {
+          ctx.ui.setStatus("persephone", "Persephone: native OMP check failed");
+          ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
+        }
+        return;
       }
-      await controlRequest(config, "/health");
-      ctx.ui.setStatus("persephone", `Persephone: ready${maintenance}`);
-    } catch {
-      ctx.ui.setStatus("persephone", `Persephone: offline${maintenance}`);
-    }
+      if (!sessionActive) return;
+      try {
+        await controlRequest(config, "/health");
+        if (sessionActive) ctx.ui.setStatus("persephone", `Persephone${maintenance}${nativeTools}${memory} · gateway ready`);
+      } catch {
+        if (sessionActive) ctx.ui.setStatus("persephone", `Persephone${maintenance}${nativeTools}${memory} · gateway offline`);
+      }
+    })();
   });
 
-  pi.on("session_shutdown", async (_event, ctx) => {
+  pi.on("session_shutdown", (_event, ctx) => {
+    sessionActive = false;
     ctx.ui.setStatus("persephone", undefined);
   });
+}
+
+async function reconcileOmpInChild(): Promise<{ changed: number; failed: number; output: string }> {
+  const child = Bun.spawn(
+    [process.execPath, path.join(repoRoot(), "src", "cli.ts"), "reconcile"],
+    {
+      cwd: repoRoot(),
+      env: { ...process.env, OTEL_SDK_DISABLED: "true" },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGTERM");
+  }, 60_000);
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  clearTimeout(timeout);
+  const combined = `${stdout}\n${stderr}`.trim();
+  const output = combined.length > 1024 * 1024 ? combined.slice(-1024 * 1024) : combined;
+  const lines = output.split(/\r?\n/);
+  const changed = lines.filter((line) => /^integrated\s/.test(line)).length;
+  const reportedFailures = lines.filter((line) => /^(?:failed|missing)\s/.test(line)).length;
+  const failed = reportedFailures + (timedOut || code !== 0 ? 1 : 0);
+  return {
+    changed,
+    failed,
+    output: timedOut ? `${output}\nTimed out after 60 seconds`.trim() : output,
+  };
 }
 
 function integrationReport(config: PersephoneConfig): Record<string, unknown> {
   return {
     ...collectIntegrationInventory(config),
+    ...nativeOmpReport(config),
     ompReconciliation: inspectOmpReconciliation(config),
+  };
+}
+
+function nativeOmpReport(config: PersephoneConfig): Record<string, unknown> {
+  const checks = config.omp.ensureLanguageServers ? inspectOmpNativeTools() : [];
+  return {
+    liveOmp: {
+      cwd: process.cwd(),
+      memoryBackend: config.omp.memoryBackend,
+      languageServersManaged: config.omp.ensureLanguageServers,
+      languageServerChecks: checks,
+      languageServerFailures: checks.filter((item) => !item.ok).length,
+      note: "OMP lists only servers applicable to current project markers; stock OMP may move a launch from ~ into a temporary directory.",
+    },
   };
 }
 
