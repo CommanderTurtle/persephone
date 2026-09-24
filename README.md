@@ -20,7 +20,7 @@ It uses Bun, SQLite, OMP's documented JSONL RPC protocol, native OMP plugins/MCP
 - Delegated native registration of Context Mode, Librarian, Retrieval, and Camofox, plus direct Codebase Memory registration.
 - Localflame's complete Firecrawl MCP surface, installed through Localflame's own repeatable OMP integration script.
 - A real OMP-compatible `browser` tool backed by local Camofox rather than Puppeteer/Chromium.
-- An idempotent OMP post-update reconciler for Firecrawl-first native search, the Camofox browser adapter, native LSP/loop-guard switches, and narrowly declared model capabilities. The plugin checks this owned state at session start by default.
+- An idempotent OMP post-update reconciler for native search availability, the Camofox browser adapter, native LSP/loop-guard switches, and narrowly declared model capabilities. The plugin checks this owned state at session start by default.
 - A Bun-only language-server appliance for TypeScript/JavaScript, Python, shell, YAML, HTML/CSS/JSON/ESLint, plus FsAutoComplete through the installed .NET SDK. OMP remains the LSP client.
 - An OMP extension with `/persephone`, a readable integration inventory, an approved reconciliation tool, gateway status, and durable prompt submission.
 - Zed-first operation through OMP's own `omp acp` bridge.
@@ -125,7 +125,7 @@ contract. Persephone no longer copies its binary path or MCP definition, so a
 Codebase Memory update has one owner and its public/private OMP profile rules
 remain identical whether invoked directly or through `persephone integrate`.
 
-Persephone does not register a second `web_search` implementation. Localflame is the single owner of the self-hosted Firecrawl MCP transport and exposes `firecrawl_search`, `firecrawl_scrape`, `firecrawl_read`, `firecrawl_find`, `firecrawl_outline`, `firecrawl_images`, and `firecrawl_resources`. OMP's native `web_search` remains available and is reconciled to select its Firecrawl provider first on each profile that has Localflame enabled. Reconciliation removes only `firecrawl` from that profile's exclusion list; it preserves the order and exclusion state of every other provider. Exa remains disabled in Persephone's managed profiles because it is a hosted search service rather than software that can be installed locally.
+Persephone does not register a second `web_search` implementation. Localflame is the single owner of the self-hosted Firecrawl MCP transport and exposes `firecrawl_search`, `firecrawl_scrape`, `firecrawl_read`, `firecrawl_find`, `firecrawl_outline`, `firecrawl_images`, and `firecrawl_resources`. OMP's native `web_search` remains available, and Persephone ensures it stays enabled on each profile that has Localflame enabled. OMP owns its current model/provider routing; Persephone no longer writes the provider-order settings removed in OMP 18.2.7. Exa remains disabled in Persephone's managed profiles because it is a hosted search service rather than software that can be installed locally.
 
 Integration also disables OMP's passive startup and marketplace update checks in every managed profile. Updates remain explicit operator actions; no background version request is part of the normal agent lifecycle.
 

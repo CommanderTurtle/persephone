@@ -81,7 +81,7 @@ dispatch therefore use the same validation as the native service.
 
 ## Web ownership
 
-Localflame owns Firecrawl transport as a standalone stdio MCP and is integrated through its checked-in OMP installer. Persephone does not implement or override `web_search`; OMP's native tool selects its Firecrawl provider first while Localflame exposes indexed search, scrape, read, find, outline, image, and resource operations. The reconciler applies that provider policy only to profiles with an active Localflame MCP entry. It removes only Firecrawl from the exclusion list and retains every unrelated provider choice. Firecrawl owns search orchestration and its SearXNG container remains an internal backend.
+Localflame owns Firecrawl transport as a standalone stdio MCP and is integrated through its checked-in OMP installer. Persephone does not implement or override `web_search`; it ensures OMP's native tool remains enabled while Localflame exposes indexed search, scrape, read, find, outline, image, and resource operations. OMP owns its model/provider routing after the provider-order settings were removed in OMP 18.2.7. Firecrawl owns search orchestration and its SearXNG container remains an internal backend.
 
 Camofox is not a Chrome DevTools Protocol endpoint, so Persephone does not route through OMP's Puppeteer implementation. The same-name `browser` extension preserves OMP's named-tab open/run/close workflow with a bounded compatibility worker and a Camofox-backed page facade. Because OMP plugin registries are profile-scoped, integration links Persephone into each profile whose MCP registry activates Camofox. The adapter is essential in those profiles; Camofox's MCP remains registered for specialist tools that do not belong in the compatibility surface.
 

@@ -69,10 +69,6 @@ export function reconcileOmp(config: PersephoneConfig): OmpReconcileResult[] {
   for (const owned of discoverOwnedProfiles(config)) {
     if (owned.localflame) {
       results.push(reconcileSetting(run, owned.profile, "web_search.enabled", () => true));
-      results.push(reconcileSetting(run, owned.profile, "providers.webSearchOrder", (current) =>
-        prependUniqueString(current, "firecrawl", "providers.webSearchOrder")));
-      results.push(reconcileSetting(run, owned.profile, "providers.webSearchExclude", (current) =>
-        removeString(current, "firecrawl", "providers.webSearchExclude")));
     }
     if (owned.camofox && config.web.camofox.replaceNativeBrowser) {
       results.push(reconcileSetting(run, owned.profile, "browser.enabled", () => false));
@@ -109,10 +105,6 @@ export function inspectOmpReconciliation(config: PersephoneConfig): OmpReconcile
   for (const owned of discoverOwnedProfiles(config)) {
     if (owned.localflame) {
       checks.push(inspectSetting(run, owned.profile, "web_search.enabled", () => true));
-      checks.push(inspectSetting(run, owned.profile, "providers.webSearchOrder", (current) =>
-        prependUniqueString(current, "firecrawl", "providers.webSearchOrder")));
-      checks.push(inspectSetting(run, owned.profile, "providers.webSearchExclude", (current) =>
-        removeString(current, "firecrawl", "providers.webSearchExclude")));
     }
     if (owned.camofox && config.web.camofox.replaceNativeBrowser) {
       checks.push(inspectSetting(run, owned.profile, "browser.enabled", () => false));
@@ -245,20 +237,6 @@ function readSetting(
 function profileArgs(profile: string, action: "get" | "set", key: string, value?: string): string[] {
   const command = ["config", action, key, ...(value === undefined ? [] : [value])];
   return profile === "default" ? command : ["--profile", profile, ...command];
-}
-
-function prependUniqueString(current: unknown, value: string, key: string): string[] {
-  if (!Array.isArray(current) || !current.every((entry) => typeof entry === "string")) {
-    throw new Error(`${key} is not a string array; refusing to replace it`);
-  }
-  return [value, ...current.filter((entry) => entry !== value)];
-}
-
-function removeString(current: unknown, value: string, key: string): string[] {
-  if (!Array.isArray(current) || !current.every((entry) => typeof entry === "string")) {
-    throw new Error(`${key} is not a string array; refusing to replace it`);
-  }
-  return current.filter((entry) => entry !== value);
 }
 
 function reconcileImageModels(

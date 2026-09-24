@@ -308,7 +308,7 @@ function probeOmpToolSurface(
     results.push({
       check: `omp-tool:${profile}:web_search`,
       ok: tools.some((tool) => tool.name === "web_search"),
-      detail: "native web_search with Firecrawl-first provider policy",
+      detail: "native web_search enabled",
     });
   }
   if (expectsCamofox) {
